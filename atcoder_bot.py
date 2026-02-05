@@ -7,8 +7,9 @@ import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import matplotlib.patches as mpatches
 from datetime import datetime, timedelta, timezone
+from flask import Flask
+from threading import Thread
 
 # ================= 設定エリア =================
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -16,16 +17,34 @@ TARGET_CHANNEL_ID = int(os.getenv("TARGET_CHANNEL_ID")) if os.getenv("TARGET_CHA
 JST = timezone(timedelta(hours=9))
 # =============================================
 
+# --- 1. Koyeb ヘルスチェック用 Webサーバー ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "AtCoder Bot is running!"
+
+def run_web_server():
+    # Koyebのデフォルトポート8000で待機
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    """Webサーバーを別スレッドで起動する"""
+    t = Thread(target=run_web_server, daemon=True)
+    t.start()
+
+# --- 2. ボットの基本設定 ---
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# キャッシュ変数
+# キャッシュデータ
 PROBLEM_MODELS = {}
 PROBLEMS = {}
 
-# AtCoderの色定義 (Difficulty -> Hex Color)
 def get_atcoder_color(diff):
+    """難易度に応じた16進数カラーコードを返す"""
     if diff < 400:  return '#808080' # 灰
     if diff < 800:  return '#804000' # 茶
     if diff < 1200: return '#008000' # 緑
@@ -36,7 +55,7 @@ def get_atcoder_color(diff):
     return '#FF0000' # 赤
 
 def fetch_api_data():
-    """AtCoder Problems APIからデータを取得してキャッシュする"""
+    """AtCoder Problems APIからデータをキャッシュする"""
     global PROBLEM_MODELS, PROBLEMS
     print(f"[{datetime.now(JST)}] Fetching API data...")
     try:
@@ -59,18 +78,8 @@ def fetch_api_data():
 async def update_data_task():
     fetch_api_data()
 
-@bot.command(name="reload_data")
-@commands.is_owner()
-async def reload_data(ctx):
-    success = fetch_api_data()
-    if success:
-        await ctx.send("✅ 最新の問題データを読み込みました。")
-    else:
-        await ctx.send("❌ データの取得に失敗しました。")
-
-CONTEST_HEAD_PATTERN = re.compile(r'^(ABC|ARC|AGC)(\d+)$', re.IGNORECASE)
-
 def create_markdown_table(stats, extra_stats, others_count, color_counts):
+    """詳細な集計テーブルを作成する"""
     labels = ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]
     header = "| カテゴリ | A | B | C | D | E | F | G | Ex | 他 | 計 |"
     sep    = "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |"
@@ -96,6 +105,8 @@ def create_markdown_table(stats, extra_stats, others_count, color_counts):
         table += f"\n**難易度内訳:** {color_line}"
     return table
 
+CONTEST_HEAD_PATTERN = re.compile(r'^(ABC|ARC|AGC)(\d+)$', re.IGNORECASE)
+
 @bot.command(name="atcoder")
 async def get_stats(ctx, member: discord.Member = None, period: str = "all", start_date: str = None, end_date: str = None):
     if TARGET_CHANNEL_ID and ctx.channel.id != TARGET_CHANNEL_ID:
@@ -112,7 +123,7 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
             since = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=JST)
             if end_date:
                 until = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=JST)
-    except ValueError:
+    except Exception:
         await ctx.send("日付形式が正しくありません (YYYY-MM-DD)。")
         return
 
@@ -131,123 +142,97 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
             if since and msg_date < since: continue
             if msg_date > until: continue
 
-            lines = message.content.split('\n')
-            for line in lines:
+            for line in message.content.split('\n'):
                 words = line.strip().split()
                 if not words: continue
-
                 first_word = words[0]
                 d_key = msg_date.date()
                 ac_count = 0
 
-                contest_match = CONTEST_HEAD_PATTERN.match(first_word)
-                if contest_match:
-                    cat = contest_match.group(1).upper()
-                    contest_num = contest_match.group(2)
+                match = CONTEST_HEAD_PATTERN.match(first_word)
+                if match:
+                    cat, num = match.group(1).upper(), match.group(2)
                     problems = words[1:]
                     ac_count = len(problems)
                     for p in problems:
-                        p_label = p.upper()
-                        p_id = f"{cat.lower()}{contest_num}_{p_label.lower()}"
-                        
-                        # 難易度取得
-                        model = PROBLEM_MODELS.get(p_id)
+                        label = p.upper()
+                        pid = f"{cat.lower()}{num}_{label.lower()}"
+                        model = PROBLEM_MODELS.get(pid)
                         if model and 'difficulty' in model:
-                            d_val = model['difficulty']
-                            diff_values.append(d_val)
-                            
-                            # 色絵文字の集計 (表用)
-                            if d_val < 400: emoji = "⚪"
-                            elif d_val < 800: emoji = "🟤"
-                            elif d_val < 1200: emoji = "🟢"
-                            elif d_val < 1600: emoji = "🔵"
-                            elif d_val < 2000: emoji = "🟦"
-                            elif d_val < 2400: emoji = "🟡"
-                            elif d_val < 2800: emoji = "🟠"
-                            else: emoji = "🔴"
-                            color_counts[emoji] = color_counts.get(emoji, 0) + 1
-
-                        if p_label in ["A", "B", "C", "D", "E", "F", "G"]:
-                            stats[cat][p_label] += 1
-                        elif p_label == "EX":
-                            stats[cat]["EX"] += 1
-                        else:
-                            stats[cat]["Other"] += 1
+                            dv = model['difficulty']
+                            diff_values.append(dv)
+                            # 色絵文字の集計
+                            if dv < 400: e = "⚪"
+                            elif dv < 800: e = "🟤"
+                            elif dv < 1200: e = "🟢"
+                            elif dv < 1600: e = "🔵"
+                            elif dv < 2000: e = "🟦"
+                            elif dv < 2400: e = "🟡"
+                            elif dv < 2800: e = "🟠"
+                            else: e = "🔴"
+                            color_counts[e] = color_counts.get(e, 0) + 1
+                        
+                        if label in ["A","B","C","D","E","F","G"]: stats[cat][label] += 1
+                        elif label == "EX": stats[cat]["EX"] += 1
+                        else: stats[cat]["Other"] += 1
                 elif "鉄則" in first_word:
-                    count = max(1, len(words) - 1)
-                    extra_stats["鉄則本"] += count
-                    ac_count = count
+                    cnt = max(1, len(words)-1); extra_stats["鉄則本"] += cnt; ac_count = cnt
                 elif "典型" in first_word:
-                    count = max(1, len(words) - 1)
-                    extra_stats["典型90問"] += count
-                    ac_count = count
+                    cnt = max(1, len(words)-1); extra_stats["典型90問"] += cnt; ac_count = cnt
                 else:
-                    others_total += 1
-                    ac_count = 1
+                    others_total += 1; ac_count = 1
                 
-                if ac_count > 0:
-                    daily_ac[d_key] = daily_ac.get(d_key, 0) + ac_count
+                if ac_count > 0: daily_ac[d_key] = daily_ac.get(d_key, 0) + ac_count
 
     if not daily_ac:
         await ctx.send(f"{member.display_name} さんの記録が見つかりませんでした。")
         return
 
-    # --- グラフ描画 ---
+    # グラフ描画
     plt.style.use('ggplot')
-    fig, (ax1, ax_diff) = plt.subplots(2, 1, figsize=(10, 10))
-    
-    # 上段: 時系列
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
     df = pd.DataFrame(list(daily_ac.items()), columns=['date', 'count']).sort_values('date')
     df['date'] = pd.to_datetime(df['date'])
     df['cumulative'] = df['count'].cumsum()
     
-    ax1.bar(df['date'], df['count'], color='#4682B4', alpha=0.7, label='Daily AC')
-    ax1.set_ylabel('Daily AC Count')
+    ax1.bar(df['date'], df['count'], color='#4682B4', alpha=0.7, label='Daily')
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-    ax1.set_title(f"Activity Over Time: {member.display_name}")
-    
     ax1_twin = ax1.twinx()
-    ax1_twin.plot(df['date'], df['cumulative'], color='#FF8C00', marker='o', linewidth=2, label='Total AC')
-    ax1_twin.set_ylabel('Total AC Count')
-    ax1_twin.grid(False)
+    ax1_twin.plot(df['date'], df['cumulative'], color='#FF8C00', marker='o', linewidth=2)
+    ax1.set_title(f"Activity: {member.display_name}")
 
-    # 下段: 難易度分布
     if diff_values:
-        bin_width = 100
-        min_bin = (min(diff_values) // bin_width) * bin_width
-        max_bin = (max(diff_values) // bin_width + 1) * bin_width
-        bins = range(min_bin, max_bin + bin_width, bin_width)
-        
-        counts, edges = pd.cut(diff_values, bins=bins, right=False, retbins=True)
-        bin_counts = counts.value_counts().sort_index()
-        
-        x_centers = [edge + bin_width/2 for edge in edges[:-1]]
-        bar_colors = [get_atcoder_color(edge) for edge in edges[:-1]]
-        
-        ax_diff.bar(x_centers, bin_counts.values, width=bin_width*0.8, color=bar_colors, edgecolor='black', alpha=0.8)
-        ax_diff.set_xlabel('Difficulty')
-        ax_diff.set_ylabel('Number of Problems')
-        ax_diff.set_title('Difficulty Distribution')
-        ax_diff.set_xticks(range(min_bin, max_bin + bin_width, 400))
-    else:
-        ax_diff.text(0.5, 0.5, 'No Difficulty Data Available', ha='center', va='center')
-
+        bw = 100
+        mi, ma = (min(diff_values)//bw)*bw, (max(diff_values)//bw+1)*bw
+        bins = range(mi, ma + bw, bw)
+        out = pd.cut(diff_values, bins=bins, right=False)
+        bc = out.value_counts().sort_index()
+        xc = [e + bw/2 for e in bins[:-1]]
+        cols = [get_atcoder_color(e) for e in bins[:-1]]
+        ax2.bar(xc, bc.values, width=bw*0.8, color=cols, edgecolor='black', alpha=0.8)
+        ax2.set_title("Difficulty Distribution")
+        ax2.set_xlabel("Difficulty")
+    
     fig.tight_layout()
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=120)
     buf.seek(0)
-    file = discord.File(buf, filename="atcoder_stats.png")
-
+    
     table_str = create_markdown_table(stats, extra_stats, others_total, color_counts)
-    await ctx.send(content=f"📊 **{member.display_name}** の集計結果\n{table_str}", file=file)
+    await ctx.send(content=f"📊 **{member.display_name}** の集計結果\n{table_str}", file=discord.File(buf, "stats.png"))
     plt.close()
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user.name}')
     fetch_api_data()
     if not update_data_task.is_running():
         update_data_task.start()
+    print(f'Logged in: {bot.user.name}')
 
-if TOKEN:
-    bot.run(TOKEN)
+# プログラム実行
+if __name__ == "__main__":
+    keep_alive() # ヘルスチェック用Webサーバー起動
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("ERROR: TOKEN not found.")
