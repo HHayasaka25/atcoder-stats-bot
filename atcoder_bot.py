@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 import re
 import io
 import os
@@ -34,10 +35,14 @@ def keep_alive():
     t = Thread(target=run_web_server, daemon=True)
     t.start()
 
-# --- Bot設定 ---
+# --- Bot設定 (Slash Command対応) ---
+class AtCoderBot(commands.Bot):
+    async def setup_hook(self):
+        await self.tree.sync()
+
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="/", intents=intents)
+bot = AtCoderBot(command_prefix="/", intents=intents)
 
 PROBLEM_MODELS = {}
 
@@ -73,8 +78,9 @@ def fetch_api_data():
 async def update_data_task():
     fetch_api_data()
 
-# --- テキスト表作成ロジック (調整版) ---
+# --- テキスト表作成ロジック (手動レイアウト版) ---
 def get_visual_width(s):
+    """文字列の見た目の幅を計算する（全角2, 半角1）"""
     width = 0
     for c in s:
         if ord(c) > 255: width += 2
@@ -82,57 +88,51 @@ def get_visual_width(s):
     return width
 
 def pad_str(s, width):
+    """見た目の幅に合わせて右スペース埋め"""
     w = get_visual_width(s)
     return s + " " * (width - w)
 
 def create_text_table(stats, extra_stats, others_count, color_counts):
-    # 幅設定
-    cw = 8  # Category Width (典型90問=8文字幅に合わせる)
-    dw = 3  # Data Width (3桁数字用)
-
-    # ヘッダー作成
-    # タイトルなし(スペースのみ) + データ列ヘッダー
-    # A~Gはセンタリング風に " A "
-    cols = [" A ", " B ", " C ", " D ", " E ", " F ", " G ", " Ex", "Oth", "Sum"]
-    header = " " * cw + "|" + "|".join(cols)
-    
-    # セパレータ: --------+---+---+...
-    line = "-" * cw + "+" + "+".join(["-" * dw] * 10)
-
     lines = []
-    lines.append(header)
-    lines.append(line)
+    
+    # ヘッダーとセパレータを手動で定義
+    lines.append("       | A | B | C | D | E | F | G | Ex|Oth|Sum")
+    lines.append("-------+---+---+---+---+---+---+---+---+---+---")
 
-    def make_row(name, vals, total):
-        # 名前をcw文字幅で左詰め
-        row = pad_str(name, cw) + "|"
-        for v in vals:
-            s_val = str(v)
-            # 幅3で右詰め
-            row += f"{s_val:>{dw}}" + "|"
-        # 合計 (右端のパイプは無し)
-        row += f"{total:>{dw}}" 
-        return row
+    # ABCの行
+    s = stats['ABC']
+    c = [s.get(k, 0) for k in ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]]
+    total = sum(c)
+    lines.append(f"ABC    |{c[0]:3}|{c[1]:3}|{c[2]:3}|{c[3]:3}|{c[4]:3}|{c[5]:3}|{c[6]:3}|{c[7]:3}|{c[8]:3}|{total:3}")
 
-    labels = ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]
-    for cat in ["ABC", "ARC", "AGC"]:
-        counts = [stats[cat].get(l, 0) for l in labels]
-        total = sum(counts)
-        lines.append(make_row(cat, counts, total))
+    # ARCの行
+    s = stats['ARC']
+    c = [s.get(k, 0) for k in ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]]
+    total = sum(c)
+    lines.append(f"ARC    |{c[0]:3}|{c[1]:3}|{c[2]:3}|{c[3]:3}|{c[4]:3}|{c[5]:3}|{c[6]:3}|{c[7]:3}|{c[8]:3}|{total:3}")
 
-    # ハイフン列の生成 "  -|" (3文字)
-    hyphen_cell = f"{'-':>{dw}}|"
-    hyphens_9 = hyphen_cell * 9
+    # AGCの行
+    s = stats['AGC']
+    c = [s.get(k, 0) for k in ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]]
+    total = sum(c)
+    lines.append(f"AGC    |{c[0]:3}|{c[1]:3}|{c[2]:3}|{c[3]:3}|{c[4]:3}|{c[5]:3}|{c[6]:3}|{c[7]:3}|{c[8]:3}|{total:3}")
 
-    for name in ["鉄則本", "典型90問"]:
-        val = extra_stats.get(name, 0)
-        row = pad_str(name, cw) + "|" + hyphens_9 + f"{val:>{dw}}"
-        lines.append(row)
+    # 共通のハイフン列
+    hyphens = " - | - | - | - | - | - | - | - | - |"
 
-    others_val = others_count
-    row = pad_str("Others", cw) + "|" + hyphens_9 + f"{others_val:>{dw}}"
-    lines.append(row)
+    # 鉄則本の行
+    val = extra_stats.get('鉄則本', 0)
+    lines.append(f"{pad_str('鉄則本', 8)}|{hyphens}{val:3}")
 
+    # 典型90問の行
+    val = extra_stats.get('典型90問', 0)
+    lines.append(f"{pad_str('典型90問', 7)}|{hyphens}{val:3}")
+
+    # Othersの行
+    val = others_count
+    lines.append(f"Others |{hyphens}{val:3}")
+
+    # 難易度内訳
     color_order = ["🔴", "🟠", "🟡", "🟦", "🔵", "🟢", "🟤", "⚪"]
     color_line = " ".join([f"{emoji}{color_counts.get(emoji, 0)}" for emoji in color_order if color_counts.get(emoji, 0) > 0])
 
@@ -143,10 +143,21 @@ def create_text_table(stats, extra_stats, others_count, color_counts):
 
 CONTEST_HEAD_PATTERN = re.compile(r'^(ABC|ARC|AGC)(\d+)$', re.IGNORECASE)
 
-@bot.command(name="atcoder")
+@bot.hybrid_command(name="atcoder", description="精進記録を集計してグラフを表示します")
+@app_commands.describe(
+    member="集計するユーザー (指定なしは自分)",
+    period="期間 (all, week, range)",
+    start_date="開始日 (YYYY-MM-DD)",
+    end_date="終了日 (YYYY-MM-DD)"
+)
 async def get_stats(ctx, member: discord.Member = None, period: str = "all", start_date: str = None, end_date: str = None):
     if TARGET_CHANNEL_ID and ctx.channel.id != TARGET_CHANNEL_ID:
+        if ctx.interaction:
+            await ctx.send("このチャンネルでは使用できません。", ephemeral=True)
         return 
+    
+    await ctx.defer()
+
     member = member or ctx.author
     now = datetime.now(JST)
     since, until = None, now
@@ -159,7 +170,7 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
             if end_date:
                 until = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=JST)
     except:
-        await ctx.send("日付形式エラー")
+        await ctx.send("日付形式エラー: YYYY-MM-DD で指定してください")
         return
 
     problem_keys = ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]
@@ -170,57 +181,56 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
     color_counts = {}
     diff_values = []
 
-    async with ctx.typing():
-        async for message in ctx.channel.history(limit=5000):
-            if message.author != member: continue
-            msg_date = message.created_at.astimezone(JST)
-            if since and msg_date < since: continue
-            if msg_date > until: continue
+    async for message in ctx.channel.history(limit=5000):
+        if message.author != member: continue
+        msg_date = message.created_at.astimezone(JST)
+        if since and msg_date < since: continue
+        if msg_date > until: continue
 
-            for line in message.content.split('\n'):
-                words = line.strip().split()
-                if not words: continue
-                first = words[0]
-                d_key = msg_date.date()
-                ac_count = 0
-                
-                match = CONTEST_HEAD_PATTERN.match(first)
-                if match:
-                    cat, num = match.group(1).upper(), match.group(2)
-                    problems = words[1:]
-                    ac_count = len(problems)
-                    for p in problems:
-                        label = p.upper()
-                        pid = f"{cat.lower()}{num}_{label.lower()}"
-                        model = PROBLEM_MODELS.get(pid)
-                        if model and 'difficulty' in model:
-                            dv = get_display_difficulty(model['difficulty'])
-                            diff_values.append(dv)
-                            
-                            if dv < 400: e = "⚪"
-                            elif dv < 800: e = "🟤"
-                            elif dv < 1200: e = "🟢"
-                            elif dv < 1600: e = "🔵"
-                            elif dv < 2000: e = "🟦"
-                            elif dv < 2400: e = "🟡"
-                            elif dv < 2800: e = "🟠"
-                            else: e = "🔴"
-                            color_counts[e] = color_counts.get(e, 0) + 1
+        for line in message.content.split('\n'):
+            words = line.strip().split()
+            if not words: continue
+            first = words[0]
+            d_key = msg_date.date()
+            ac_count = 0
+            
+            match = CONTEST_HEAD_PATTERN.match(first)
+            if match:
+                cat, num = match.group(1).upper(), match.group(2)
+                problems = words[1:]
+                ac_count = len(problems)
+                for p in problems:
+                    label = p.upper()
+                    pid = f"{cat.lower()}{num}_{label.lower()}"
+                    model = PROBLEM_MODELS.get(pid)
+                    if model and 'difficulty' in model:
+                        dv = get_display_difficulty(model['difficulty'])
+                        diff_values.append(dv)
                         
-                        if label in ["A","B","C","D","E","F","G"]: stats[cat][label] += 1
-                        elif label == "EX": stats[cat]["EX"] += 1
-                        else: stats[cat]["Other"] += 1
-                elif "鉄則" in first:
-                    cnt = max(1, len(words)-1); extra_stats["鉄則本"] += cnt; ac_count = cnt
-                elif "典型" in first:
-                    cnt = max(1, len(words)-1); extra_stats["典型90問"] += cnt; ac_count = cnt
-                else:
-                    others_total += 1; ac_count = 1
-                
-                if ac_count > 0: daily_ac[d_key] = daily_ac.get(d_key, 0) + ac_count
+                        if dv < 400: e = "⚪"
+                        elif dv < 800: e = "🟤"
+                        elif dv < 1200: e = "🟢"
+                        elif dv < 1600: e = "🔵"
+                        elif dv < 2000: e = "🟦"
+                        elif dv < 2400: e = "🟡"
+                        elif dv < 2800: e = "🟠"
+                        else: e = "🔴"
+                        color_counts[e] = color_counts.get(e, 0) + 1
+                    
+                    if label in ["A","B","C","D","E","F","G"]: stats[cat][label] += 1
+                    elif label == "EX": stats[cat]["EX"] += 1
+                    else: stats[cat]["Other"] += 1
+            elif "鉄則" in first:
+                cnt = max(1, len(words)-1); extra_stats["鉄則本"] += cnt; ac_count = cnt
+            elif "典型" in first:
+                cnt = max(1, len(words)-1); extra_stats["典型90問"] += cnt; ac_count = cnt
+            else:
+                others_total += 1; ac_count = 1
+            
+            if ac_count > 0: daily_ac[d_key] = daily_ac.get(d_key, 0) + ac_count
 
     if not daily_ac:
-        await ctx.send("記録なし")
+        await ctx.send("該当期間の記録が見つかりませんでした。")
         return
 
     # --- グラフ描画 ---
@@ -266,50 +276,4 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
         bw = 100
         max_val = max(diff_values)
         upper_bound = (int(max_val) // bw + 1) * bw
-        if upper_bound < 400: upper_bound = 400 
-
-        bins = range(0, upper_bound + bw + bw, bw)
-        
-        out = pd.cut(diff_values, bins=bins, right=False)
-        bc = out.value_counts().sort_index()
-        xc = [e + bw/2 for e in bins[:-1]]
-        cols = [get_atcoder_color(e) for e in bins[:-1]]
-        
-        ax2.bar(xc, bc.values, width=bw, color=cols, edgecolor='black')
-        ax2.set_title("Difficulty Distribution")
-        ax2.set_xlabel("Difficulty")
-        ax2.set_ylabel("Count")
-        ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax2.set_ylim(bottom=0)
-        
-        x_limit = upper_bound + bw
-        ax2.set_xlim(left=0, right=x_limit)
-        
-        if x_limit <= 800: step = 100 
-        elif x_limit <= 1600: step = 200
-        else: step = 400
-            
-        ax2.set_xticks(range(0, x_limit + step, step))
-        
-        plt.tight_layout()
-        buf2 = io.BytesIO()
-        plt.savefig(buf2, format='png', dpi=100)
-        buf2.seek(0)
-        files.append(discord.File(buf2, "difficulty.png"))
-        plt.close(fig2)
-    
-    await ctx.send(content=create_text_table(stats, extra_stats, others_total, color_counts), files=files)
-
-@bot.event
-async def on_ready():
-    fetch_api_data()
-    if not update_data_task.is_running():
-        update_data_task.start()
-    print(f'Logged in: {bot.user.name}')
-
-if __name__ == "__main__":
-    keep_alive()
-    if TOKEN:
-        bot.run(TOKEN)
-    else:
-        print("ERROR: TOKEN not found.")
+        if upper_bound < 400: upper_
