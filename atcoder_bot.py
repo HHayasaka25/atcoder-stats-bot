@@ -4,6 +4,7 @@ from discord import app_commands
 import re
 import io
 import os
+import sys
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -16,7 +17,14 @@ import math
 
 # ================= 設定エリア =================
 TOKEN = os.getenv("DISCORD_TOKEN")
-TARGET_CHANNEL_ID = int(os.getenv("TARGET_CHANNEL_ID")) if os.getenv("TARGET_CHANNEL_ID") else None
+# チャンネルIDの取得（エラーハンドリング付き）
+try:
+    target_id_raw = os.getenv("TARGET_CHANNEL_ID")
+    TARGET_CHANNEL_ID = int(target_id_raw) if target_id_raw else None
+except ValueError:
+    TARGET_CHANNEL_ID = None
+    print("Warning: TARGET_CHANNEL_ID is not a valid integer.")
+
 JST = timezone(timedelta(hours=9))
 # =============================================
 
@@ -78,9 +86,8 @@ def fetch_api_data():
 async def update_data_task():
     fetch_api_data()
 
-# --- テキスト表作成ロジック (手動レイアウト版) ---
+# --- テキスト表作成ロジック (調整版) ---
 def get_visual_width(s):
-    """文字列の見た目の幅を計算する（全角2, 半角1）"""
     width = 0
     for c in s:
         if ord(c) > 255: width += 2
@@ -88,51 +95,53 @@ def get_visual_width(s):
     return width
 
 def pad_str(s, width):
-    """見た目の幅に合わせて右スペース埋め"""
     w = get_visual_width(s)
     return s + " " * (width - w)
 
 def create_text_table(stats, extra_stats, others_count, color_counts):
-    lines = []
+    # 幅設定: 基本7文字 (ABC等に合わせる)
+    cw = 7
+    dw = 3  # Data Width
+
+    # ヘッダー
+    cols = [" A ", " B ", " C ", " D ", " E ", " F ", " G ", " Ex", "Oth", "Sum"]
+    header = " " * cw + "|" + "|".join(cols)
     
-    # ヘッダーとセパレータを手動で定義
-    lines.append("       | A | B | C | D | E | F | G | Ex|Oth|Sum")
-    lines.append("-------+---+---+---+---+---+---+---+---+---+---")
+    # セパレータ
+    line = "-" * cw + "+" + "+".join(["-" * dw] * 10)
 
-    # ABCの行
-    s = stats['ABC']
-    c = [s.get(k, 0) for k in ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]]
-    total = sum(c)
-    lines.append(f"ABC    |{c[0]:3}|{c[1]:3}|{c[2]:3}|{c[3]:3}|{c[4]:3}|{c[5]:3}|{c[6]:3}|{c[7]:3}|{c[8]:3}|{total:3}")
+    lines = []
+    lines.append(header)
+    lines.append(line)
 
-    # ARCの行
-    s = stats['ARC']
-    c = [s.get(k, 0) for k in ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]]
-    total = sum(c)
-    lines.append(f"ARC    |{c[0]:3}|{c[1]:3}|{c[2]:3}|{c[3]:3}|{c[4]:3}|{c[5]:3}|{c[6]:3}|{c[7]:3}|{c[8]:3}|{total:3}")
+    def make_row(name, vals, total):
+        row = pad_str(name, cw) + "|"
+        for v in vals:
+            s_val = str(v)
+            row += f"{s_val:>{dw}}" + "|"
+        row += f"{total:>{dw}}" 
+        return row
 
-    # AGCの行
-    s = stats['AGC']
-    c = [s.get(k, 0) for k in ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]]
-    total = sum(c)
-    lines.append(f"AGC    |{c[0]:3}|{c[1]:3}|{c[2]:3}|{c[3]:3}|{c[4]:3}|{c[5]:3}|{c[6]:3}|{c[7]:3}|{c[8]:3}|{total:3}")
+    labels = ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]
+    for cat in ["ABC", "ARC", "AGC"]:
+        counts = [stats[cat].get(l, 0) for l in labels]
+        total = sum(counts)
+        lines.append(make_row(cat, counts, total))
 
-    # 共通のハイフン列
-    hyphens = " - | - | - | - | - | - | - | - | - |"
+    # ハイフン列: 中央揃え
+    hyphen_cell = f"{'-':^{dw}}|"
+    hyphens_9 = hyphen_cell * 9
 
-    # 鉄則本の行
-    val = extra_stats.get('鉄則本', 0)
-    lines.append(f"{pad_str('鉄則本', 8)}|{hyphens}{val:3}")
+    for name in ["鉄則本", "典型90問"]:
+        val = extra_stats.get(name, 0)
+        # 日本語カテゴリは8文字幅で固定（ここだけパイプ位置がずれる）
+        row = pad_str(name, 8) + "|" + hyphens_9 + f"{val:>{dw}}"
+        lines.append(row)
 
-    # 典型90問の行
-    val = extra_stats.get('典型90問', 0)
-    lines.append(f"{pad_str('典型90問', 7)}|{hyphens}{val:3}")
+    others_val = others_count
+    row = pad_str("Others", cw) + "|" + hyphens_9 + f"{others_val:>{dw}}"
+    lines.append(row)
 
-    # Othersの行
-    val = others_count
-    lines.append(f"Others |{hyphens}{val:3}")
-
-    # 難易度内訳
     color_order = ["🔴", "🟠", "🟡", "🟦", "🔵", "🟢", "🟤", "⚪"]
     color_line = " ".join([f"{emoji}{color_counts.get(emoji, 0)}" for emoji in color_order if color_counts.get(emoji, 0) > 0])
 
@@ -276,4 +285,50 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
         bw = 100
         max_val = max(diff_values)
         upper_bound = (int(max_val) // bw + 1) * bw
-        if upper_bound < 400: upper_
+        if upper_bound < 400: upper_bound = 400 
+
+        bins = range(0, upper_bound + bw + bw, bw)
+        
+        out = pd.cut(diff_values, bins=bins, right=False)
+        bc = out.value_counts().sort_index()
+        xc = [e + bw/2 for e in bins[:-1]]
+        cols = [get_atcoder_color(e) for e in bins[:-1]]
+        
+        ax2.bar(xc, bc.values, width=bw, color=cols, edgecolor='black')
+        ax2.set_title("Difficulty Distribution")
+        ax2.set_xlabel("Difficulty")
+        ax2.set_ylabel("Count")
+        ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax2.set_ylim(bottom=0)
+        
+        x_limit = upper_bound + bw
+        ax2.set_xlim(left=0, right=x_limit)
+        
+        if x_limit <= 800: step = 100 
+        elif x_limit <= 1600: step = 200
+        else: step = 400
+            
+        ax2.set_xticks(range(0, x_limit + step, step))
+        
+        plt.tight_layout()
+        buf2 = io.BytesIO()
+        plt.savefig(buf2, format='png', dpi=100)
+        buf2.seek(0)
+        files.append(discord.File(buf2, "difficulty.png"))
+        plt.close(fig2)
+    
+    await ctx.send(content=create_text_table(stats, extra_stats, others_total, color_counts), files=files)
+
+@bot.event
+async def on_ready():
+    fetch_api_data()
+    if not update_data_task.is_running():
+        update_data_task.start()
+    print(f'Logged in: {bot.user.name}')
+
+if __name__ == "__main__":
+    keep_alive()
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("ERROR: TOKEN not found.")
