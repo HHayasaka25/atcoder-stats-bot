@@ -179,7 +179,6 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
                         pid = f"{cat.lower()}{num}_{label.lower()}"
                         model = PROBLEM_MODELS.get(pid)
                         if model and 'difficulty' in model:
-                            # 補正後Difficulty
                             dv = get_display_difficulty(model['difficulty'])
                             diff_values.append(dv)
                             
@@ -239,7 +238,6 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
     ax1_t.set_ylim(0, math.ceil((max_c+0.1)/5)*5)
     ax1.set_title(f"Activity: {member.display_name}")
     
-    # 凡例なし
     plt.tight_layout()
     buf1 = io.BytesIO()
     plt.savefig(buf1, format='png', dpi=100)
@@ -252,7 +250,12 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
         fig2, ax2 = plt.subplots(figsize=(10, 5))
         bw = 100
         max_val = max(diff_values)
-        bins = range(0, (int(max_val) // bw + 2) * bw, bw)
+        
+        # 軸の最大値を決定
+        upper_bound = (int(max_val) // bw + 1) * bw
+        if upper_bound < 400: upper_bound = 400 # 最低でも400まで表示した方がAtCoderっぽさが出るが、データ次第
+
+        bins = range(0, upper_bound + bw + bw, bw)
         
         out = pd.cut(diff_values, bins=bins, right=False)
         bc = out.value_counts().sort_index()
@@ -265,7 +268,19 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
         ax2.set_ylabel("Count")
         ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax2.set_ylim(bottom=0)
-        ax2.set_xticks(range(0, (int(max_val) // bw + 2) * bw, 400))
+        
+        # --- X軸目盛りの動的調整 ---
+        x_limit = upper_bound + bw
+        ax2.set_xlim(left=0, right=x_limit)
+
+        if x_limit <= 800:
+            step = 100 # 低難易度のみの場合は細かく
+        elif x_limit <= 1600:
+            step = 200
+        else:
+            step = 400 # 高難易度まである場合は色境界に合わせる
+            
+        ax2.set_xticks(range(0, x_limit + step, step))
         
         plt.tight_layout()
         buf2 = io.BytesIO()
