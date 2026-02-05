@@ -41,7 +41,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 
 PROBLEM_MODELS = {}
 
-# 難易度補正 (400未満を0-400に変換)
+# 難易度補正
 def get_display_difficulty(raw_diff):
     if raw_diff >= 400:
         return raw_diff
@@ -73,7 +73,7 @@ def fetch_api_data():
 async def update_data_task():
     fetch_api_data()
 
-# --- テキスト表作成ロジック ---
+# --- テキスト表作成ロジック (調整版) ---
 def get_visual_width(s):
     width = 0
     for c in s:
@@ -86,19 +86,32 @@ def pad_str(s, width):
     return s + " " * (width - w)
 
 def create_text_table(stats, extra_stats, others_count, color_counts):
-    header = "Category |  A |  B |  C |  D |  E |  F |  G | Ex |Oth |Sum "
-    line   = "---------+----+----+----+----+----+----+----+----+----+----"
+    # 幅設定
+    cw = 8  # Category Width (典型90問=8文字幅に合わせる)
+    dw = 3  # Data Width (3桁数字用)
+
+    # ヘッダー作成
+    # タイトルなし(スペースのみ) + データ列ヘッダー
+    # A~Gはセンタリング風に " A "
+    cols = [" A ", " B ", " C ", " D ", " E ", " F ", " G ", " Ex", "Oth", "Sum"]
+    header = " " * cw + "|" + "|".join(cols)
     
+    # セパレータ: --------+---+---+...
+    line = "-" * cw + "+" + "+".join(["-" * dw] * 10)
+
     lines = []
     lines.append(header)
     lines.append(line)
 
     def make_row(name, vals, total):
-        row = pad_str(name, 9) + "|"
+        # 名前をcw文字幅で左詰め
+        row = pad_str(name, cw) + "|"
         for v in vals:
             s_val = str(v)
-            row += f"{s_val:>4}" + "|"
-        row += f"{total:>4} "
+            # 幅3で右詰め
+            row += f"{s_val:>{dw}}" + "|"
+        # 合計 (右端のパイプは無し)
+        row += f"{total:>{dw}}" 
         return row
 
     labels = ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]
@@ -107,15 +120,17 @@ def create_text_table(stats, extra_stats, others_count, color_counts):
         total = sum(counts)
         lines.append(make_row(cat, counts, total))
 
+    # ハイフン列の生成 "  -|" (3文字)
+    hyphen_cell = f"{'-':>{dw}}|"
+    hyphens_9 = hyphen_cell * 9
+
     for name in ["鉄則本", "典型90問"]:
         val = extra_stats.get(name, 0)
-        hyphens = "".join([f"{'-':>4}|" for _ in range(9)])
-        row = pad_str(name, 9) + "|" + hyphens + f"{val:>4} "
+        row = pad_str(name, cw) + "|" + hyphens_9 + f"{val:>{dw}}"
         lines.append(row)
 
     others_val = others_count
-    hyphens = "".join([f"{'-':>4}|" for _ in range(9)])
-    row = pad_str("Others", 9) + "|" + hyphens + f"{others_val:>4} "
+    row = pad_str("Others", cw) + "|" + hyphens_9 + f"{others_val:>{dw}}"
     lines.append(row)
 
     color_order = ["🔴", "🟠", "🟡", "🟦", "🔵", "🟢", "🟤", "⚪"]
@@ -250,10 +265,8 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
         fig2, ax2 = plt.subplots(figsize=(10, 5))
         bw = 100
         max_val = max(diff_values)
-        
-        # 軸の最大値を決定
         upper_bound = (int(max_val) // bw + 1) * bw
-        if upper_bound < 400: upper_bound = 400 # 最低でも400まで表示した方がAtCoderっぽさが出るが、データ次第
+        if upper_bound < 400: upper_bound = 400 
 
         bins = range(0, upper_bound + bw + bw, bw)
         
@@ -269,16 +282,12 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
         ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax2.set_ylim(bottom=0)
         
-        # --- X軸目盛りの動的調整 ---
         x_limit = upper_bound + bw
         ax2.set_xlim(left=0, right=x_limit)
-
-        if x_limit <= 800:
-            step = 100 # 低難易度のみの場合は細かく
-        elif x_limit <= 1600:
-            step = 200
-        else:
-            step = 400 # 高難易度まである場合は色境界に合わせる
+        
+        if x_limit <= 800: step = 100 
+        elif x_limit <= 1600: step = 200
+        else: step = 400
             
         ax2.set_xticks(range(0, x_limit + step, step))
         
