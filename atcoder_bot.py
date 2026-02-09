@@ -209,6 +209,9 @@ async def diffhist(ctx, user_id: str):
             ax.axvspan(max(0, low), min(x_limit, high), facecolor=col, alpha=0.15, zorder=1)
 
     ax.bar(xc, bc.values, width=bw, color=cols, edgecolor='black', zorder=3)
+    for x, y in zip(xc, bc.values):
+        if y > 0:
+            ax.text(x, y, str(y), ha='center', va='bottom', fontsize=9, fontweight='bold')
     ax.set_title(f"Difficulty Distribution (User: {user_id}, AC: {len(diff_values)})")
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_xlim(left=0, right=x_limit)
