@@ -19,7 +19,7 @@ jobs:
           port: 22
           # ここからが、サーバーの中で実行させる「実際のコマンド」です
           script: |
-            cd ~/atcoder-bot
+            cd ~/atcoder-stats-bot
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt
