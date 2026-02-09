@@ -2,4 +2,3 @@ discord.py
 pandas
 matplotlib
 requests
-flask

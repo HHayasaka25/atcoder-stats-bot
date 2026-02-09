@@ -4,20 +4,18 @@ from discord import app_commands
 import re
 import io
 import os
-import sys
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import MaxNLocator
 from datetime import datetime, timedelta, timezone
-from flask import Flask
-from threading import Thread
 import math
 
 # ================= 設定エリア =================
+# systemdのEnvironment設定から取得されます
 TOKEN = os.getenv("DISCORD_TOKEN")
-# チャンネルIDの取得（エラーハンドリング付き）
+
 try:
     target_id_raw = os.getenv("TARGET_CHANNEL_ID")
     TARGET_CHANNEL_ID = int(target_id_raw) if target_id_raw else None
@@ -27,21 +25,6 @@ except ValueError:
 
 JST = timezone(timedelta(hours=9))
 # =============================================
-
-# --- Webサーバー ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-def run_web_server():
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run_web_server, daemon=True)
-    t.start()
 
 # --- Bot設定 (Slash Command対応) ---
 class AtCoderBot(commands.Bot):
@@ -86,7 +69,7 @@ def fetch_api_data():
 async def update_data_task():
     fetch_api_data()
 
-# --- テキスト表作成ロジック (調整版) ---
+# --- テキスト表作成ロジック ---
 def get_visual_width(s):
     width = 0
     for c in s:
@@ -96,77 +79,87 @@ def get_visual_width(s):
 
 def pad_str(s, width):
     w = get_visual_width(s)
-    return s + " " * (width - w)
+    # 幅が足りない場合のみスペースを追加
+    return s + " " * max(0, width - w)
 
 def create_text_table(stats, extra_stats, others_count, color_counts):
-    # 幅設定: 基本7文字 (ABC等に合わせる)
-    cw = 7
-    dw = 3  # Data Width
+    # ==========================================
+    # ▼ 直感的な幅指定エリア
+    # キー: コンテスト名, 値: 全体の表示幅(文字数)
+    # ※テーブルの縦線 '|' を揃えたい場合は数値を調整してください
+    WIDTH_CONFIG = {
+        "Header":   7,  # ヘッダー(1行目)の左端の幅
+        "ABC":      7,
+        "ARC":      7,
+        "AGC":      7,
+        "AWC":      7,  # 新しく追加
+        "鉄則本":     8,  # 日本語など幅がズレやすいものは個別に広げる
+        "典型90問":   8,
+        "Others":   7,
+    }
+    # ==========================================
 
-    # ヘッダー
-    cols = [" A ", " B ", " C ", " D ", " E ", " F ", " G ", " Ex", "Oth", "Sum"]
-    header = " " * cw + "|" + "|".join(cols)
+    dw = 3 # データ部分の幅 (3桁まで対応)
     
-    # セパレータ
-    line = "-" * cw + "+" + "+".join(["-" * dw] * 10)
-
-    lines = []
-    lines.append(header)
-    lines.append(line)
+    # ヘッダー作成
+    hw = WIDTH_CONFIG.get("Header", 7)
+    cols = [" A ", " B ", " C ", " D ", " E ", " F ", " G ", " Ex", "Oth", "Sum"]
+    header = " " * hw + "|" + "|".join(cols)
+    line = "-" * hw + "+" + "+".join(["-" * dw] * 10)
+    lines = [header, line]
 
     def make_row(name, vals, total):
-        row = pad_str(name, cw) + "|"
+        # 設定から幅を取得。なければHeaderと同じにする
+        w = WIDTH_CONFIG.get(name, hw)
+        row = pad_str(name, w) + "|"
         for v in vals:
-            s_val = str(v)
-            row += f"{s_val:>{dw}}" + "|"
+            row += f"{str(v):>{dw}}|"
         row += f"{total:>{dw}}" 
         return row
 
     labels = ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]
-    for cat in ["ABC", "ARC", "AGC"]:
+    
+    # 標準コンテスト (AWCを追加)
+    target_cats = ["ABC", "ARC", "AGC", "AWC"]
+    for cat in target_cats:
         counts = [stats[cat].get(l, 0) for l in labels]
         total = sum(counts)
         lines.append(make_row(cat, counts, total))
 
-    # ハイフン列: 中央揃え
     hyphen_cell = f"{'-':^{dw}}|"
     hyphens_9 = hyphen_cell * 9
-
+    
+    # その他日本語系コンテスト
     for name in ["鉄則本", "典型90問"]:
         val = extra_stats.get(name, 0)
-        # 日本語カテゴリは8文字幅で固定（ここだけパイプ位置がずれる）
-        row = pad_str(name, 8) + "|" + hyphens_9 + f"{val:>{dw}}"
+        w = WIDTH_CONFIG.get(name, 8)
+        # 日本語行は詳細データがないためハイフンで埋める
+        row = pad_str(name, w) + "|" + hyphens_9 + f"{val:>{dw}}"
         lines.append(row)
 
-    others_val = others_count
-    row = pad_str("Others", cw) + "|" + hyphens_9 + f"{others_val:>{dw}}"
+    # Others
+    w_oth = WIDTH_CONFIG.get("Others", 7)
+    row = pad_str("Others", w_oth) + "|" + hyphens_9 + f"{others_total:>{dw}}"
     lines.append(row)
 
+    # 色文字の生成
     color_order = ["🔴", "🟠", "🟡", "🟦", "🔵", "🟢", "🟤", "⚪"]
     color_line = " ".join([f"{emoji}{color_counts.get(emoji, 0)}" for emoji in color_order if color_counts.get(emoji, 0) > 0])
-
+    
     text_table = "```text\n" + "\n".join(lines) + "\n```"
-    if color_line:
-        text_table += f"\nDifficulty: {color_line}"
+    if color_line: text_table += f"\nDifficulty: {color_line}"
     return text_table
 
-CONTEST_HEAD_PATTERN = re.compile(r'^(ABC|ARC|AGC)(\d+)$', re.IGNORECASE)
+# 正規表現にAWCを追加
+CONTEST_HEAD_PATTERN = re.compile(r'^(ABC|ARC|AGC|AWC)(\d+)$', re.IGNORECASE)
 
 @bot.hybrid_command(name="atcoder", description="精進記録を集計してグラフを表示します")
-@app_commands.describe(
-    member="集計するユーザー (指定なしは自分)",
-    period="期間 (all, week, range)",
-    start_date="開始日 (YYYY-MM-DD)",
-    end_date="終了日 (YYYY-MM-DD)"
-)
+@app_commands.describe(member="集計するユーザー", period="期間 (all, week, range)", start_date="開始日", end_date="終了日")
 async def get_stats(ctx, member: discord.Member = None, period: str = "all", start_date: str = None, end_date: str = None):
     if TARGET_CHANNEL_ID and ctx.channel.id != TARGET_CHANNEL_ID:
-        if ctx.interaction:
-            await ctx.send("このチャンネルでは使用できません。", ephemeral=True)
+        if ctx.interaction: await ctx.send("このチャンネルでは使用できません。", ephemeral=True)
         return 
-    
     await ctx.defer()
-
     member = member or ctx.author
     now = datetime.now(JST)
     since, until = None, now
@@ -183,8 +176,12 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
         return
 
     problem_keys = ["A", "B", "C", "D", "E", "F", "G", "EX", "Other"]
-    stats = {cat: {l: 0 for l in problem_keys} for cat in ["ABC", "ARC", "AGC"]}
+    # 統計用辞書にAWCを追加
+    target_cats = ["ABC", "ARC", "AGC", "AWC"]
+    stats = {cat: {l: 0 for l in problem_keys} for cat in target_cats}
+    
     extra_stats = {"鉄則本": 0, "典型90問": 0}
+    global others_total
     others_total = 0
     daily_ac = {}
     color_counts = {}
@@ -215,27 +212,31 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
                     if model and 'difficulty' in model:
                         dv = get_display_difficulty(model['difficulty'])
                         diff_values.append(dv)
-                        
                         if dv < 400: e = "⚪"
                         elif dv < 800: e = "🟤"
                         elif dv < 1200: e = "🟢"
-                        elif dv < 1600: e = "🔵"
-                        elif dv < 2000: e = "🟦"
+                        elif dv < 1600: e = "💧"
+                        elif dv < 2000: e = "🔵"
                         elif dv < 2400: e = "🟡"
                         elif dv < 2800: e = "🟠"
                         else: e = "🔴"
                         color_counts[e] = color_counts.get(e, 0) + 1
                     
-                    if label in ["A","B","C","D","E","F","G"]: stats[cat][label] += 1
-                    elif label == "EX": stats[cat]["EX"] += 1
-                    else: stats[cat]["Other"] += 1
+                    # 統計辞書にあるカテゴリのみカウント (ABC, ARC, AGC, AWC)
+                    if cat in stats:
+                        if label in ["A","B","C","D","E","F","G"]: stats[cat][label] += 1
+                        elif label == "EX": stats[cat]["EX"] += 1
+                        else: stats[cat]["Other"] += 1
+                    else:
+                        # 万が一辞書にないカテゴリがマッチした場合(基本ないはずだが安全策)
+                        others_total += 1
+                        
             elif "鉄則" in first:
                 cnt = max(1, len(words)-1); extra_stats["鉄則本"] += cnt; ac_count = cnt
             elif "典型" in first:
                 cnt = max(1, len(words)-1); extra_stats["典型90問"] += cnt; ac_count = cnt
             else:
                 others_total += 1; ac_count = 1
-            
             if ac_count > 0: daily_ac[d_key] = daily_ac.get(d_key, 0) + ac_count
 
     if not daily_ac:
@@ -245,33 +246,20 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
     # --- グラフ描画 ---
     plt.style.use('ggplot')
     files = []
-    
     df = pd.DataFrame(list(daily_ac.items()), columns=['date', 'count']).sort_values('date')
     df['date'] = pd.to_datetime(df['date'])
     df['cum'] = df['count'].cumsum()
     
-    # [グラフ1: Activity]
     fig1, ax1 = plt.subplots(figsize=(10, 5))
     ax1.bar(df['date'], df['count'], color='#4682B4', alpha=0.9)
     ax1.set_ylabel('Daily AC')
     ax1.yaxis.set_major_locator(MaxNLocator(integer=True))
-    ax1.set_ylim(bottom=0)
-    ax1.xaxis.set_major_locator(mdates.DayLocator(interval=1))
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-
     ax1_t = ax1.twinx()
     ax1_t.plot(df['date'], df['cum'], color='#FF8C00', marker='o', linewidth=2)
     ax1_t.set_ylabel('Total AC')
     ax1_t.yaxis.set_major_locator(MaxNLocator(integer=True))
-    ax1_t.set_ylim(bottom=0)
-    ax1_t.grid(False)
-
-    max_d = df['count'].max()
-    max_c = df['cum'].max()
-    ax1.set_ylim(0, math.ceil((max_d+0.1)/5)*5)
-    ax1_t.set_ylim(0, math.ceil((max_c+0.1)/5)*5)
     ax1.set_title(f"Activity: {member.display_name}")
-    
     plt.tight_layout()
     buf1 = io.BytesIO()
     plt.savefig(buf1, format='png', dpi=100)
@@ -279,37 +267,18 @@ async def get_stats(ctx, member: discord.Member = None, period: str = "all", sta
     files.append(discord.File(buf1, "activity.png"))
     plt.close(fig1)
 
-    # [グラフ2: Diff分布]
     if diff_values:
         fig2, ax2 = plt.subplots(figsize=(10, 5))
         bw = 100
-        max_val = max(diff_values)
-        upper_bound = (int(max_val) // bw + 1) * bw
-        if upper_bound < 400: upper_bound = 400 
-
+        upper_bound = max(400, (int(max(diff_values)) // bw + 1) * bw)
         bins = range(0, upper_bound + bw + bw, bw)
-        
         out = pd.cut(diff_values, bins=bins, right=False)
         bc = out.value_counts().sort_index()
         xc = [e + bw/2 for e in bins[:-1]]
         cols = [get_atcoder_color(e) for e in bins[:-1]]
-        
         ax2.bar(xc, bc.values, width=bw, color=cols, edgecolor='black')
         ax2.set_title("Difficulty Distribution")
-        ax2.set_xlabel("Difficulty")
-        ax2.set_ylabel("Count")
         ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax2.set_ylim(bottom=0)
-        
-        x_limit = upper_bound + bw
-        ax2.set_xlim(left=0, right=x_limit)
-        
-        if x_limit <= 800: step = 100 
-        elif x_limit <= 1600: step = 200
-        else: step = 400
-            
-        ax2.set_xticks(range(0, x_limit + step, step))
-        
         plt.tight_layout()
         buf2 = io.BytesIO()
         plt.savefig(buf2, format='png', dpi=100)
@@ -327,7 +296,6 @@ async def on_ready():
     print(f'Logged in: {bot.user.name}')
 
 if __name__ == "__main__":
-    keep_alive()
     if TOKEN:
         bot.run(TOKEN)
     else:

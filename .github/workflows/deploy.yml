@@ -1,0 +1,26 @@
+name: Deploy Bot
+
+# mainブランチに push されたときに実行する
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and Deploy
+        # SSHでログインするための便利なプログラム（アクション）を使います
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.GCP_IP }}
+          username: ${{ secrets.GCP_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          port: 22
+          # ここからが、サーバーの中で実行させる「実際のコマンド」です
+          script: |
+            cd ~/atcoder-bot
+            git pull origin main
+            source venv/bin/activate
+            pip install -r requirements.txt
+            sudo systemctl restart discord-bot
