@@ -153,22 +153,21 @@ def test_large_total_axis_starts_at_zero_with_upper_margin():
 
 
 @pytest.mark.parametrize('total', [0, 1, 8, 55, 675, 1000])
-def test_total_effort_ticks_extend_into_top_margin(total):
+def test_total_effort_axis_matches_matplotlib_defaults_except_zero_start(total):
     data = aggregate([row(str(i)) for i in range(total)], {}, now=TODAY)
     _, fig = stats_figures(data)
     ax = fig.axes[0]
-    ticks = ax.get_yticks()
-    assert ax.get_ylim()[0] == ticks[0] == 0
-    step = ticks[1] - ticks[0]
-    assert all(ticks[i+1] - ticks[i] == pytest.approx(step) for i in range(len(ticks)-1))
-    assert all(int(tick) == tick for tick in ticks)
-    visible = [tick for tick in ticks if tick <= ax.get_ylim()[1]]
-    assert ax.get_ylim()[1] - visible[-1] < step
-    if total == 8:
-        assert visible == [0, 2, 4, 6, 8]
+    from matplotlib.figure import Figure
+    reference = Figure(figsize=fig.get_size_inches(), dpi=fig.dpi)
+    default_ax = reference.add_axes(ax.get_position().bounds)
+    default_ax.plot(range(-1, len(data['total_labels'])), data['cumulative'])
+    default_ax.set_ylim(bottom=0)
+    assert ax.get_ylim() == default_ax.get_ylim()
+    assert list(ax.get_yticks()) == list(default_ax.get_yticks())
+    assert ax.get_ylim()[0] == 0
     FigureCanvasAgg(fig).draw()
     assert all(line.get_visible() for line in ax.get_ygridlines())
-    assert [line.get_ydata()[0] for line in ax.get_ygridlines()] == list(ticks)
+    assert [line.get_ydata()[0] for line in ax.get_ygridlines()] == list(ax.get_yticks())
 
 
 def test_daily_all_endpoint_markers_have_horizontal_margin():

@@ -16,7 +16,6 @@ def figure(title, *, rectangle=(0.10, 0.22, 0.86, 0.66)):
     ax.set_title(title, fontsize=19)
     ax.set_ylabel('AC count', fontsize=15)
     ax.tick_params(labelsize=13)
-    ax.yaxis.set_major_locator(MaxNLocator(integer=True, min_n_ticks=2))
     ax.set_axisbelow(True)
     ax.grid(axis='y', alpha=.25)
     for spine in ax.spines.values():
@@ -27,6 +26,7 @@ def figure(title, *, rectangle=(0.10, 0.22, 0.86, 0.66)):
 def stats_figures(data):
     fig_a, ax_a = figure(data['title'])
     fig_b, ax_b = figure('Total Effort')
+    ax_a.yaxis.set_major_locator(MaxNLocator(integer=True, min_n_ticks=2))
     x = list(range(len(data['labels'])))
     bottom = [0] * len(x)
     for i, col in enumerate(COLORS + ['#e6dff2']):
@@ -40,8 +40,7 @@ def stats_figures(data):
     # Total Effort always has a daily axis, regardless of the bar aggregation.
     total_x = list(range(len(data['total_labels'])))
     ax_b.plot(range(-1, len(total_x)), data['cumulative'], color='#FF8C00', linewidth=2.5)
-    ax_b.set_ylim(0, max(1, data['total']) * 1.15)
-    ax_b.yaxis.set_major_locator(MaxNLocator(nbins=6, integer=True))
+    ax_b.set_ylim(bottom=0)
     for ax, positions_all, labels in ((ax_a, x, data['labels']), (ax_b, total_x, data['total_labels'])):
         stride = max(1, (len(positions_all) + 7) // 8)
         positions = positions_all[::stride]
@@ -71,6 +70,7 @@ def histogram_figure(values, user):
     # A second title line keeps long IDs inside the image.
     fig, ax = figure(f'Difficulty Distribution\n{user} | AC: {len(values)}',
                      rectangle=(0.10, 0.14, 0.86, 0.70))
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True, min_n_ticks=2))
     upper = max(400, (max(values, default=0) // 100 + 1) * 100)
     x_limit = upper + 100
     starts = list(range(0, upper, 100))

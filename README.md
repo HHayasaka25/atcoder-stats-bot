@@ -25,7 +25,7 @@ registerの応答とupdateの処理結果は実行者だけに表示します。
 
 ## 調査結果と旧Botからの変更
 
-EffortのDifficulty不明分は網掛けせず、既存のDifficulty色と異なる薄い紫で表示します。Total Effortの縦軸は0から始まり、Matplotlib標準の整数目盛りを使用します。8ACでは0・2・4・6・8を表示します。
+EffortのDifficulty不明分は網掛けせず、既存のDifficulty色と異なる薄い紫で表示します。Total Effortの縦軸は0から始まり、上限と目盛りはMatplotlibのデフォルトを使用します。
 
 調査開始時のGit HEADは`2bbfa12`、作業ツリーはクリーンでした。既存の全プロジェクトファイル（`atcoder_bot.py`、`requirements.txt`、`README.md`、`.github/workflows/deploy.yml`）を確認しました。サービス定義・既存DB・永続ディスクのマウント設定はリポジトリにありません。
 
