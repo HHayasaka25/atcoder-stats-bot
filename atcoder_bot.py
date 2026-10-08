@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 def help_embed():
     embed = discord.Embed(title='AtCoder 初AC管理 — /ac help', color=0xFF8C00)
     descriptions = [
-        ('/ac register', 'Discord IDにAtCoder IDを登録し、直近50ACを自分だけに表示します。開催中は表示を保留します。変更時は確認が必要です。\n引数: atcoder_id（必須）\n例: `/ac register atcoder_id:tourist`'),
+        ('/ac register', 'Discord IDにAtCoder IDを登録し、直近25ACを実行したチャンネルで公開表示します。開催中は表示を保留します。変更時は確認が必要です。\n引数: atcoder_id（必須）\n例: `/ac register atcoder_id:tourist`'),
         ('/ac update', '登録IDの履歴全体を最新化します（取得は48時間重複を含む差分）。全初ACを保存し、公開投稿は直近50問まで・1メッセージです。古い省略分は持ち越しません。開催中は終了まで保留します。\n引数: なし\n例: `/ac update`'),
         ('/ac stats', '自分の登録IDの初AC数・期間内累計・生涯Difficulty分布を3枚の画像で表示します。保存済み履歴を使用します。Total Effortは常に日別、Difficulty分布は100刻みで不明を除外します。\n引数: period=weekly/monthly/all（初期値all）, aggregation=daily/weekly/monthly（棒グラフのallのみ、初期値daily）\n例: `/ac stats`'),
         ('/ac stats_id', '指定したAtCoder IDの統計を表示します。未登録IDだけ全履歴を取得しキャッシュします。Discordとの登録は作りません。\n引数: atcoder_id（必須）, period・aggregation（statsと同じ）\n例: `/ac stats_id atcoder_id:tourist period:all aggregation:monthly`'),
@@ -47,7 +47,7 @@ async def show_registration(interaction, service, user, already_registered=False
     await interaction.followup.send(
         f'{"登録済み" if already_registered else "登録しました"}。AC {total}',
         embed=discord.Embed(**payload, color=0xFF8C00) if payload['description'] else None,
-        ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def report_error(interaction, error):
@@ -109,7 +109,7 @@ class ACCommands(app_commands.Group):
     async def on_error(self, interaction, error):
         await report_error(interaction, error)
 
-    @app_commands.command(name='register', description='AtCoder IDを登録し、直近50ACを自分だけに表示します')
+    @app_commands.command(name='register', description='AtCoder IDを登録し、直近25ACを実行したチャンネルで公開表示します')
     @app_commands.describe(atcoder_id='登録するAtCoder ID')
     async def register(self, interaction: discord.Interaction, atcoder_id: str):
         user = normalize_id(atcoder_id)
@@ -117,17 +117,17 @@ class ACCommands(app_commands.Group):
         expected = reg['atcoder_id'] if reg else None
         self.service.db.check_registration(interaction.guild_id, interaction.user.id, user, expected)
         if expected == user:
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer(thinking=True)
             await self.service.register(interaction.guild_id, interaction.user.id, atcoder_id, expected)
             await show_registration(interaction, self.service, atcoder_id, already_registered=True)
             return
         if expected:
             view = RegisterConfirmation(self.service, interaction.guild_id, interaction.user.id, atcoder_id, expected)
             await interaction.response.send_message(
-                f'登録IDを `{reg["display_id"]}` から `{atcoder_id}` に変更します。新しいIDの全履歴を取得し、過去ACは投稿しません。変更しますか？',
+                f'登録IDを `{reg["display_id"]}` から `{atcoder_id}` に変更します。直近25ACをこのチャンネルで公開表示します。変更しますか？',
                 view=view, ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
         await self.service.register(interaction.guild_id, interaction.user.id, atcoder_id)
         await show_registration(interaction, self.service, atcoder_id)
 

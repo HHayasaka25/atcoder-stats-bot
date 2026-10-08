@@ -85,7 +85,7 @@ class ACService:
         rows = self.db.rows(normalize_id(user))
         eligible = [row for row in rows if self.contest_finished(row['contest_id'], int(self.now()))]
         models, problems = self.metadata()
-        payload, _ = make_update(user, eligible, models, problems)
+        payload, _ = make_update(user, eligible, models, problems, limit=25)
         payload['title'] = f'AC — {user}'
         return len(rows), payload
 

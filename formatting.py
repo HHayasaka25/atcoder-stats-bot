@@ -68,9 +68,9 @@ def utf16_length(text):
     return len(text.encode('utf-16-le')) // 2
 
 
-def make_update(user, rows, models, problems):
-    title = f'AC update — {user}（直近50件まで）'
-    rows = sorted(rows, key=lambda r: (r['epoch_second'], r['submission_id']))[-50:]
+def make_update(user, rows, models, problems, *, limit=50):
+    title = f'AC update — {user}（直近{limit}件まで）'
+    rows = sorted(rows, key=lambda r: (r['epoch_second'], r['submission_id']))[-limit:]
 
     def body(selected):
         lines, previous = [], None

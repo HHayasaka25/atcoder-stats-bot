@@ -265,7 +265,7 @@ def test_command_surface_and_help_no_automatic_sync(tmp_path):
 
 
 @pytest.mark.parametrize('mode', ['new', 'existing', 'change'])
-async def test_register_previews_latest_50_privately_without_public_delivery(tmp_path, service, api, mode):
+async def test_register_displays_latest_25_publicly_without_update_delivery(tmp_path, service, api, mode):
     if mode == 'change':
         await service.register(10, 123, 'bob')
     api.submissions.return_value = [submission(f'abc100_p{i}', sid=i+1, second=NOW-1000+i) for i in range(80)]
@@ -285,15 +285,16 @@ async def test_register_previews_latest_50_privately_without_public_delivery(tmp
     else:
         group = bot.tree.get_command('ac')
         await group.get_command('register').callback(group, interaction, 'Alice')
+        interaction.response.defer.assert_awaited_once_with(thinking=True)
     interaction.followup.send.assert_awaited_once()
     args, kwargs = interaction.followup.send.call_args
     assert args == (('登録済み' if mode == 'existing' else '登録しました') + '。AC 80',)
-    assert kwargs['ephemeral'] is True
+    assert kwargs['ephemeral'] is False
     body = kwargs['embed'].description
     assert kwargs['embed'].title == ('AC — alice' if mode == 'change' else 'AC — Alice')
-    assert body.count('https://atcoder.jp/') == 50
-    assert 'ABC100 P29]' not in body
-    assert body.index('ABC100 P30]') < body.index('ABC100 P79]')
+    assert body.count('https://atcoder.jp/') == 25
+    assert 'ABC100 P54]' not in body
+    assert body.index('ABC100 P55]') < body.index('ABC100 P79]')
     assert service.db.candidates(service.db.registration(10, 123)) == []
     assert len(service.db.rows('alice')) == 80
     if mode == 'existing':
@@ -313,6 +314,28 @@ async def test_register_preview_hides_ongoing_and_handles_empty_history(service,
     total, payload = await service.registration_preview('bob')
     assert total == 1 and payload['description'] == ''
     assert len(service.db.rows('bob')) == 1
+
+
+async def test_update_publishes_problem_list_to_target_channel(tmp_path, service, api):
+    await service.register(10, 123, 'Alice')
+    api.submissions.return_value = [submission(f'abc100_p{i}', sid=i+1, second=NOW-100+i) for i in range(60)]
+    bot = AtCoderBot(str(tmp_path / 'unused.db'), 42)
+    bot.service = service
+    group = bot.tree.get_command('ac')
+    channel = MagicMock()
+    channel.send = AsyncMock(return_value=MagicMock(id=987))
+    interaction = MagicMock(guild_id=10)
+    interaction.user.id = 123
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    with patch.object(group, 'target_channel', new=AsyncMock(return_value=channel)):
+        await group.get_command('update').callback(group, interaction)
+    channel.send.assert_awaited_once()
+    kwargs = channel.send.call_args.kwargs
+    assert 'ephemeral' not in kwargs
+    assert kwargs['embed'].description.count('https://atcoder.jp/') == 50
+    interaction.followup.send.assert_awaited_once()
+    assert interaction.followup.send.call_args.kwargs['ephemeral'] is True
 
 
 @pytest.mark.parametrize('command,user', [('stats', None), ('stats_id', 'bob')])
