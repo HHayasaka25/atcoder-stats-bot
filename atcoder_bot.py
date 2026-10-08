@@ -16,7 +16,7 @@ from ac_statistics import aggregate, histogram_values
 from atcoder_api import APIError, AtCoderAPI, normalize_id
 from database import Database, RegistrationError
 from formatting import JST
-from plotting import render_histogram, render_stats
+from plotting import render_stats
 from service import ACService
 
 log = logging.getLogger(__name__)
@@ -27,8 +27,8 @@ def help_embed():
     descriptions = [
         ('/ac register', 'Discord IDにAtCoder IDを登録します。初回は全提出履歴を保存し、過去ACは投稿しません。変更時は確認が必要です。\n引数: atcoder_id（必須）\n例: `/ac register atcoder_id:tourist`'),
         ('/ac update', '登録IDの履歴全体を最新化します（取得は48時間重複を含む差分）。全初ACを保存し、公開投稿は直近50問まで・1メッセージです。古い省略分は持ち越しません。開催中は終了まで保留します。\n引数: なし\n例: `/ac update`'),
-        ('/ac stats', '保存済み履歴から初AC数と選択期間内累計を2枚の画像で表示します。未登録IDを明示した場合のみ全履歴取得（キャッシュあり）。ID省略時は自分の登録IDです。\n引数: atcoder_id（任意）, period=weekly/monthly/all（初期値weekly）, aggregation=weekly/monthly（allのみ、初期値monthly）\n例: `/ac stats period:all aggregation:monthly`'),
-        ('/ac diffhist', '生涯初ACのDifficulty分布（100刻み）を表示します。AHC・重複・Difficulty不明を除外。データ取得方針はstatsと同じです。\n引数: atcoder_id（任意）\n例: `/ac diffhist atcoder_id:tourist`'),
+        ('/ac stats', '自分の登録IDの初AC数・期間内累計・生涯Difficulty分布を3枚の画像で表示します。保存済み履歴を使用します。Total Effortは常に日別、Difficulty分布は100刻みで不明を除外します。\n引数: period=weekly/monthly/all（初期値weekly）, aggregation=daily/weekly/monthly（棒グラフのallのみ、初期値monthly）\n例: `/ac stats period:all aggregation:daily`'),
+        ('/ac stats_id', '指定したAtCoder IDの統計を表示します。未登録IDだけ全履歴を取得しキャッシュします。Discordとの登録は作りません。\n引数: atcoder_id（必須）, period・aggregation（statsと同じ）\n例: `/ac stats_id atcoder_id:tourist period:all aggregation:monthly`'),
         ('/ac help', 'このヘルプを表示します。\n引数: なし\n例: `/ac help`'),
     ]
     for name, description in descriptions:
@@ -157,30 +157,34 @@ class ACCommands(app_commands.Group):
             text = f'投稿可能な新規初ACはありません。新規保存 {result["new"]}問、開催中・開催情報不明の保留 {result["held"]}問。'
         await interaction.followup.send(text, ephemeral=True)
 
-    @app_commands.command(name='stats', description='初AC数と期間内累計を2枚のグラフで表示します')
-    @app_commands.describe(atcoder_id='省略時は自分の登録ID', period='weekly=7日、monthly=30日、all=全期間', aggregation='all時の集計単位（初期値monthly）')
-    async def stats(self, interaction: discord.Interaction, atcoder_id: str | None = None,
+    @app_commands.command(name='stats', description='自分の初AC数・日別累計・生涯Difficulty分布を表示します')
+    @app_commands.describe(period='weekly=7日、monthly=30日、all=全期間', aggregation='all時の棒グラフ集計: daily/weekly/monthly（初期値monthly）')
+    async def stats(self, interaction: discord.Interaction,
                     period: Literal['weekly', 'monthly', 'all'] = 'weekly',
-                    aggregation: Literal['weekly', 'monthly'] = 'monthly'):
+                    aggregation: Literal['daily', 'weekly', 'monthly'] = 'monthly'):
+        await self._show_stats(interaction, period, aggregation)
+
+    @app_commands.command(name='stats_id', description='指定IDの初AC数・日別累計・生涯Difficulty分布を表示します')
+    @app_commands.describe(atcoder_id='統計を見るAtCoder ID（必須）', period='weekly=7日、monthly=30日、all=全期間', aggregation='all時の棒グラフ集計: daily/weekly/monthly（初期値monthly）')
+    async def stats_id(self, interaction: discord.Interaction, atcoder_id: str,
+                       period: Literal['weekly', 'monthly', 'all'] = 'weekly',
+                       aggregation: Literal['daily', 'weekly', 'monthly'] = 'monthly'):
+        await self._show_stats(interaction, period, aggregation, atcoder_id)
+
+    async def _show_stats(self, interaction, period, aggregation, atcoder_id=None):
         await interaction.response.defer(thinking=True)
         user, rows, synced, models = await self.service.stats_data(interaction.guild_id, interaction.user.id, atcoder_id)
         data = aggregate(rows, models, period, aggregation)
-        a, b = await asyncio.to_thread(render_stats, data)
-        stamp = datetime.fromtimestamp(synced, JST).strftime('%Y-%m-%d %H:%M:%S JST')
-        await interaction.followup.send(f'`{user}`：対象期間の初AC {data["total"]}問（AHC除外）\nデータ最終取得: {stamp}',
-                                        files=[discord.File(a, 'effort.png'), discord.File(b, 'total_effort.png')],
-                                        allowed_mentions=discord.AllowedMentions.none())
-
-    @app_commands.command(name='diffhist', description='生涯初ACのDifficulty分布を表示します')
-    @app_commands.describe(atcoder_id='省略時は自分の登録ID')
-    async def diffhist(self, interaction: discord.Interaction, atcoder_id: str | None = None):
-        await interaction.response.defer(thinking=True)
-        user, rows, synced, models = await self.service.stats_data(interaction.guild_id, interaction.user.id, atcoder_id)
         values = histogram_values(rows, models)
-        image = await asyncio.to_thread(render_histogram, values, user)
+        a, b, histogram = await asyncio.to_thread(render_stats, data, values, user)
         stamp = datetime.fromtimestamp(synced, JST).strftime('%Y-%m-%d %H:%M:%S JST')
-        await interaction.followup.send(f'`{user}`：Difficulty付き生涯初AC {len(values)}問 / 全初AC {len(rows)}問（不明 {len(rows)-len(values)}問、AHC除外）\nデータ最終取得: {stamp}',
-                                        file=discord.File(image, 'diff_hist.png'), allowed_mentions=discord.AllowedMentions.none())
+        period_label = {'weekly': '直近7日', 'monthly': '直近30日', 'all': '全期間'}[period]
+        await interaction.followup.send(f'`{user}`：{period_label}の初AC {data["total"]}問\n'
+                                        f'生涯Difficulty分布: {len(values)}問 / 生涯初AC {len(rows)}問（不明 {len(rows)-len(values)}問）\n'
+                                        f'データ最終取得: {stamp}',
+                                        files=[discord.File(a, 'effort.png'), discord.File(b, 'total_effort.png'),
+                                               discord.File(histogram, 'diff_hist.png')],
+                                        allowed_mentions=discord.AllowedMentions.none())
 
     @app_commands.command(name='help', description='登録・更新・統計の使い方を日本語で表示します')
     async def help(self, interaction: discord.Interaction):

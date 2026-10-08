@@ -8,13 +8,18 @@ AtCoder Problems APIだけを履歴ソースとし、問題ごとの生涯初AC�
 |---|---|
 | `/ac register atcoder_id:alice` | Discordの数値IDとAtCoder IDをサーバー単位で登録。全提出を取得して初ACを保存。過去ACは投稿しません。変更には120秒以内のボタン確認が必要です。同一サーバーでIDの重複登録は拒否します。 |
 | `/ac update` | 48時間の重複を含む差分取得。新規初ACは全件保存し、投稿可能な直近50問までを古い日時順・JSTの日付別で精進チャンネルに1回だけ投稿します。 |
-| `/ac stats` | 自分の直近7日の日別初AC数と期間内累計を、別々のPNGで表示。 |
-| `/ac stats atcoder_id:alice period:monthly` | 直近30日を日別表示。 |
+| `/ac stats` | 自分の直近7日の日別初AC数・期間内累計・生涯Difficulty分布を、3枚の独立したPNGで表示。 |
+| `/ac stats period:monthly` | 自分の直近30日を日別表示。ID入力は不要です。 |
+| `/ac stats period:all aggregation:daily` | 自分の全期間を日別表示。ACが0件の日も含めます。 |
 | `/ac stats period:all aggregation:weekly` | 全期間を月曜始まりの週別表示。allの初期値は月別（aggregation:monthly）。 |
-| `/ac diffhist atcoder_id:alice` | 生涯初ACのDifficulty分布。100刻み、Difficulty不明は除外して件数を明示。ID省略時は自分の登録ID。 |
+| `/ac stats_id atcoder_id:alice period:all aggregation:monthly` | 指定したAtCoder IDの統計を表示。IDは必須で、period・aggregationはstatsと共通。 |
 | `/ac help` | 上記5コマンドの日本語ヘルプ。 |
 
-registerの応答とupdateの処理結果は実行者だけに表示します。updateの公開投稿先は常に`TARGET_CHANNEL_ID`です。他のチャンネルから実行しても実行場所へは投稿しません。投稿先が同じサーバーに属し、実行者が閲覧可能であることと、Botの閲覧・送信・Embedリンク権限を検証します。stats・diffhist・helpは公開応答です。DMでは使用できません。
+`/ac stats`は自分専用、`/ac stats_id`はAtCoder ID指定用です。以前の`/ac stats atcoder_id:...`は`/ac stats_id atcoder_id:...`へ変更してください。Total Effortは選択期間内の累計初AC数を**常に日別**で表示し、期間の開始は0です。全期間の棒グラフは`aggregation=daily/weekly/monthly`で日別・週別・月別を選べます（初期値monthly）。直近7日・30日の棒グラフは常に日別です。棒と累計の横軸はそれぞれの集計単位で独立しています。
+
+Difficulty分布はstats/stats_idに統合しました。単独の`/ac diffhist`は廃止しています。分布は従来どおり**生涯初AC**を100刻みで集計し、Difficulty不明を除外して件数を表示します。periodは棒と累計の期間を指定します。1回の履歴取得から3枚を生成し、1回のDiscord応答に添付します。全グラフの縦軸は`AC count`です。ヒストグラムの下余白と上端の余白を調整し、右側に1bin分（Difficulty 100）の余白を設けています。長いIDのタイトルは2行にして画像内に収めています。
+
+registerの応答とupdateの処理結果は実行者だけに表示します。updateの公開投稿先は常に`TARGET_CHANNEL_ID`です。他のチャンネルから実行しても実行場所へは投稿しません。投稿先が同じサーバーに属し、実行者が閲覧可能であることと、Botの閲覧・送信・Embedリンク権限を検証します。stats・stats_id・helpは公開応答です。DMでは使用できません。
 
 所有者の厳密な確認は行いません。登録成功は本人確認を意味しません。提出が0件の応答では、ユーザーが存在しないのか履歴がないのかも判別できません。
 
@@ -99,7 +104,7 @@ SQLiteはWAL、外部キー、30秒のbusy timeoutを使用し、`BEGIN IMMEDIAT
 - Discord送信が失敗したり送信結果が不明でも、成功済みのAPI取得結果と選択した投稿候補は保持します。確認できた送信成功だけを投稿済みとし、置き換え済みバッチに対する古い送信結果では新しい候補を投稿済みにしません。50問・文字数制限で省略した問題は、その回の投稿が失敗しても次回へ持ち越しません。
 - 50問より多い場合は時刻の新しい50問を選び、その中でEmbed description 4096・全体6000のUTF-16単位以内に収まるまで古い順に省略します。省略行は`excluded`として次回へ持ち越しません。
 - 開催情報は`contests.json`を使用し、終了が確認できるまで`held`にします。情報の欠落・不正・取得失敗時は安全側に保留します。過去の取得時点で終了を確認済みのコンテストは、更新失敗時も投稿できます。延期等で不正確な公開メタデータそのものを検出する保証はありません。
-- Difficultyと問題情報はコマンド実行時に最大1日1回、開催情報はupdate時に最大5分1回更新します。登録済みIDのstats/diffhistはこれらもAPI取得せず保存済み情報だけを使用します。情報が古い場合はupdateで更新してください。
+- Difficultyと問題情報はコマンド実行時に最大1日1回、開催情報はupdate時に最大5分1回更新します。登録済みIDのstats/stats_idはこれらもAPI取得せず保存済み情報だけを使用します。情報が古い場合はupdateで更新してください。
 - 未登録IDの直接指定だけ全履歴を取得して1時間キャッシュします。Discordとの登録は作成しません。
 
 **Discord送信成功直後、DBへの送信済み記録前にプロセスが異常終了した場合、または送信結果が通信断で不明の場合は、再試行による重複投稿があり得ます。** SQLiteとDiscord間に分散トランザクションがないためexactly-onceは保証できません。

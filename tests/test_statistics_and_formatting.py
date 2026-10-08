@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+import io
+from unittest.mock import AsyncMock, MagicMock, patch
 import discord
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 import pytest
 from ac_statistics import aggregate, histogram_values
 from atcoder_bot import AtCoderBot, help_embed, RegisterConfirmation
@@ -45,7 +47,9 @@ def test_all_weekly_monday_and_empty_weeks():
     assert all(d.weekday() == 0 for d in data['labels'])
     assert data['counts'] == [1, 0, 0, 1]
     assert data['title'] == 'Weekly Effort'
-    assert data['cumulative'] == [0, 1, 1, 1, 2]
+    assert data['total_labels'][0].isoformat() == '2026-09-20'
+    assert data['daily_counts'] == [1] + [0]*17 + [1]
+    assert data['cumulative'] == [0] + [1]*18 + [2]
 
 
 def test_all_defaults_monthly_and_empty_months():
@@ -53,13 +57,45 @@ def test_all_defaults_monthly_and_empty_months():
     data = aggregate(rows, {}, period='all', now=TODAY)
     assert data['counts'] == [1, 0, 0, 1]
     assert data['title'] == 'Monthly Effort'
+    assert len(data['total_labels']) == 70
+    assert len(data['cumulative']) == 71
+    assert data['cumulative'][0] == 0 and data['cumulative'][-1] == 2
 
 
-@pytest.mark.parametrize('period,aggregation', [('weekly', 'monthly'), ('monthly', 'monthly'), ('all', 'weekly'), ('all', 'monthly')])
+def test_all_daily_includes_history_older_than_a_week_and_zero_days():
+    rows = [row(date=TODAY-timedelta(days=10)), row('abc100_b', date=TODAY)]
+    data = aggregate(rows, {}, period='all', aggregation='daily', now=TODAY)
+    assert data['title'] == 'Daily Effort'
+    assert len(data['labels']) == 11
+    assert data['counts'] == [1] + [0]*9 + [1]
+    assert data['total_labels'] == data['labels']
+    assert data['daily_counts'] == data['counts']
+    assert data['cumulative'] == [0] + [1]*10 + [2]
+
+
+@pytest.mark.parametrize('aggregation', ['daily', 'weekly', 'monthly'])
+def test_total_effort_is_daily_for_every_all_aggregation(aggregation):
+    rows = [row(date=TODAY-timedelta(days=10)), row('abc100_b', date=TODAY-timedelta(days=8)),
+            row('abc100_c', date=TODAY)]
+    data = aggregate(rows, {}, period='all', aggregation=aggregation, now=TODAY)
+    assert len(data['total_labels']) == 11
+    assert data['daily_counts'] == [1, 0, 1] + [0]*7 + [1]
+    assert data['cumulative'] == [0, 1, 1] + [2]*8 + [3]
+    assert sum(data['counts']) == data['total'] == 3
+    bar, total = stats_figures(data)
+    assert len(total.axes[0].lines[0].get_xdata()) == 12
+    assert total.axes[0].get_xlim()[1] == 10.6
+    if aggregation != 'daily':
+        assert len(data['labels']) < len(data['total_labels'])
+        assert bar.axes[0].get_xlim()[1] < total.axes[0].get_xlim()[1]
+
+
+@pytest.mark.parametrize('period,aggregation', [('weekly', 'monthly'), ('monthly', 'monthly'), ('all', 'daily'), ('all', 'weekly'), ('all', 'monthly')])
 def test_empty_history(period, aggregation):
     data = aggregate([], {}, period, aggregation, now=TODAY)
     assert data['total'] == 0 and all(c == 0 for c in data['cumulative'])
     assert len(data['labels']) >= 1
+    assert len(data['cumulative']) == len(data['total_labels']) + 1
 
 
 def test_correction_and_histogram_unknown():
@@ -86,7 +122,9 @@ def test_graphs_are_independent_and_pngs_small():
     assert b.axes[0].get_ylim()[0] < 0
     assert all(s.get_visible() for ax in (a.axes[0], b.axes[0]) for s in ax.spines.values())
     assert a.axes[0].get_legend() is None
-    for image in render_stats(data):
+    images = render_stats(data, [620], 'alice')
+    assert len(images) == 3
+    for image in images:
         assert image.getvalue().startswith(b'\x89PNG')
         assert len(image.getvalue()) < 1024*1024
 
@@ -109,12 +147,42 @@ def test_large_total_baseline_has_visible_margin():
     assert all(t >= 0 and int(t) == t for t in fig.axes[0].get_yticks())
 
 
+def test_daily_all_endpoint_markers_have_horizontal_margin():
+    rows = [row(date=TODAY-timedelta(days=1000)), row('abc100_b')]
+    data = aggregate(rows, {}, period='all', aggregation='monthly', now=TODAY)
+    _, fig = stats_figures(data)
+    left, right = fig.axes[0].get_xlim()
+    points = fig.axes[0].lines[0].get_xdata()
+    assert (points[0] - left) / (right-left) > .01
+    assert (right - points[-1]) / (right-left) > .01
+
+
 def test_histogram_100_bins_and_original_background():
     fig = histogram_figure([0, 99, 100, 620, 3100], 'alice')
     bars = [p for p in fig.axes[0].patches if p.get_alpha() != .15]
     assert all(p.get_width() == 100 for p in bars)
     assert [p.get_height() for p in bars[:2]] == [2, 1]
     assert 'AC: 5' in fig.axes[0].get_title()
+
+
+@pytest.mark.parametrize('values', [[], [620], [620]*100, [0, 100, 3100]])
+def test_histogram_layout_labels_and_text_are_inside_image(values):
+    fig = histogram_figure(values, 'a'*32)
+    ax = fig.axes[0]
+    canvas = FigureCanvasAgg(fig)
+    canvas.draw()
+    renderer = canvas.get_renderer()
+    assert ax.get_position().y0 == pytest.approx(.14)
+    assert ax.get_ylabel() == 'AC count'
+    assert ax.get_ylim()[0] == 0
+    assert ax.get_ylim()[1] == pytest.approx(max(1, max((p.get_height() for p in ax.patches if p.get_alpha() != .15), default=0) * 1.15 + .15))
+    for text in [ax.title, ax.xaxis.label, ax.yaxis.label, *ax.texts]:
+        bounds = text.get_window_extent(renderer)
+        assert 0 <= bounds.x0 <= bounds.x1 <= fig.bbox.width
+        assert 0 <= bounds.y0 <= bounds.y1 <= fig.bbox.height
+    data = aggregate([row()], {}, now=TODAY)
+    for chart in stats_figures(data):
+        assert chart.axes[0].get_ylabel() == 'AC count'
 
 
 def test_update_order_unknown_and_jst_grouping():
@@ -154,17 +222,55 @@ def test_command_surface_and_help_no_automatic_sync(tmp_path):
     commands = bot.tree.get_commands()
     assert [c.name for c in commands] == ['ac']
     group = commands[0]
-    assert {c.name for c in group.commands} == {'register', 'update', 'stats', 'diffhist', 'help'}
+    assert {c.name for c in group.commands} == {'register', 'update', 'stats', 'stats_id', 'help'}
     stats = group.get_command('stats')
-    assert {p.name for p in stats.parameters} == {'atcoder_id', 'period', 'aggregation'}
+    assert [p.name for p in stats.parameters] == ['period', 'aggregation']
     assert stats.get_parameter('period').default == 'weekly'
     assert stats.get_parameter('aggregation').default == 'monthly'
+    assert [c.value for c in stats.get_parameter('aggregation').choices] == ['daily', 'weekly', 'monthly']
+    stats_id = group.get_command('stats_id')
+    assert [p.name for p in stats_id.parameters] == ['atcoder_id', 'period', 'aggregation']
+    assert stats_id.get_parameter('atcoder_id').required
+    assert stats_id.get_parameter('period').default == 'weekly'
+    assert stats_id.get_parameter('aggregation').default == 'monthly'
     assert len(help_embed().fields) == 5 and len(help_embed()) < 6000
     for name in ('atcoder_bot.py', 'service.py'):
         source = Path(name).read_text()
         assert 'tasks.loop' not in source and 'create_task(' not in source
     assert bot.intents.message_content is False
     assert bot.session is None and bot.db is None  # Construction does not fetch history.
+
+
+@pytest.mark.parametrize('command,user', [('stats', None), ('stats_id', 'bob')])
+@pytest.mark.parametrize('period', ['weekly', 'all'])
+async def test_stats_commands_share_rendering_and_route_the_correct_id(tmp_path, command, user, period):
+    bot = AtCoderBot(str(tmp_path / 'unused.db'), 42)
+    bot.service = MagicMock()
+    rows = [row(date=TODAY-timedelta(days=40)), row('abc100_b')]
+    bot.service.stats_data = AsyncMock(return_value=(user or 'alice', rows, NOW, {'abc100_a': {'difficulty': 620}}))
+    group = bot.tree.get_command('ac')
+    interaction = MagicMock(guild_id=10)
+    interaction.user.id = 123
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    with patch('atcoder_bot.aggregate', side_effect=lambda *args: aggregate(*args, now=TODAY)), \
+         patch('atcoder_bot.render_stats', return_value=(io.BytesIO(b'png-a'), io.BytesIO(b'png-b'), io.BytesIO(b'png-c'))) as render:
+        args = {'period': period, 'aggregation': 'daily'}
+        if user:
+            args['atcoder_id'] = user
+        await group.get_command(command).callback(group, interaction, **args)
+    bot.service.stats_data.assert_awaited_once_with(10, 123, user)
+    interaction.response.defer.assert_awaited_once_with(thinking=True)
+    interaction.followup.send.assert_awaited_once()
+    message = interaction.followup.send.call_args.args[0]
+    assert ('全期間の初AC 2問' if period == 'all' else '直近7日の初AC 1問') in message
+    assert '生涯Difficulty分布: 1問 / 生涯初AC 2問（不明 1問）' in message
+    assert 'AHC' not in message
+    assert render.call_args.args[0]['title'] == 'Daily Effort'
+    assert render.call_args.args[0]['total'] == (2 if period == 'all' else 1)
+    assert render.call_args.args[1:] == ([620], user or 'alice')
+    files = interaction.followup.send.call_args.kwargs['files']
+    assert [file.filename for file in files] == ['effort.png', 'total_effort.png', 'diff_hist.png']
 
 
 async def test_update_channel_and_guild_validation(tmp_path):

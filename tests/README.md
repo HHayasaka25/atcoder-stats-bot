@@ -2,7 +2,7 @@
 
 実API・Discordの送信はすべてモックです。ネットワークを使うのは依存ライブラリ導入時だけです。
 
-2026-10-08のローカル検証結果: **64 passed**（Python 3.14.4）。コンパイル確認・依存関係の整合性確認・Git差分の空白チェックも成功しました。代表的な積み上げ棒・期間内累計・ヒストグラムPNGを生成して目視確認しました。
+2026-10-08のローカル検証結果: **78 passed**（Python 3.14.4）。コンパイル確認・依存関係の整合性確認・Git差分の空白チェックも成功しました。代表的な積み上げ棒・期間内累計・ヒストグラムPNGを生成して目視確認しました。コマンド経由の描画テストは、制限環境のスレッド終了処理で停止したため、制限の外で検証しました（外部API通信なし）。
 
 ```bash
 MPLCONFIGDIR=/tmp/atcoder-bot-mpl .venv/bin/python -m pytest -q
@@ -24,9 +24,9 @@ MPLCONFIGDIR=/tmp/atcoder-bot-mpl .venv/bin/python -m pytest -q
 | 10 API失敗時カーソル不変 | test_service: api_failure_does_not_advance_cursor |
 | 11 再処理一意 | test_service: incremental_reac_earlier_first_and_idempotency |
 | 12 Discord数値ID対応 | test_service: registration_full_history、duplicate_and_change_confirmation |
-| 13 weekly/monthly/all | test_statistics_and_formatting: weekly、monthly、all_weekly、all_defaults_monthly |
+| 13 weekly/monthly/all | test_statistics_and_formatting: weekly、monthly、all_daily、all_weekly、all_defaults_monthly |
 | 14 0件の日も集計 | test_statistics_and_formatting: weekly_zero_days、empty_history |
-| 15 期間内累計 | test_statistics_and_formatting: weekly_zero_days_period_cumulative |
+| 15 期間内累計 | test_statistics_and_formatting: weekly_zero_days_period_cumulative、total_effort_is_daily_for_every_all_aggregation |
 | 16 Difficulty不明もAC計数 | test_statistics_and_formatting: weekly_zero_days、correction_and_histogram_unknown |
 | 17 独立Figure・PNG | test_statistics_and_formatting: graphs_are_independent_and_pngs_small |
 | 18 問題→色→Difficulty | test_statistics_and_formatting: update_order_unknown_and_jst_grouping |
@@ -38,3 +38,5 @@ MPLCONFIGDIR=/tmp/atcoder-bot-mpl .venv/bin/python -m pytest -q
 加えて、登録失敗・DBエラーのロールバック、登録競合、投稿失敗後のDB再オープンと最新差分取得、失敗分と新規初ACの統合・50問超過と再失敗、送信待ちがある場合のAPI失敗、送信結果不明時の候補保持、開催状況の再判定、古いバッチの成功通知の無効化、バッチ再構築のロールバック、旧DBの非破壊的移行、複数サーバーでの投稿分離、未登録IDキャッシュ、登録済み統計のAPI非アクセス、429・5xx・タイムアウトと再試行上限、同一秒飽和、入力／API応答検証、未知DB保護、稼働中WALバックアップと上書き拒否、Botの二重起動拒否、大きな累計でも0の点が軸に隠れない余白を検証します。
 
 Discordに実接続しないため、実サーバー権限、Interactionの実UI、コマンド反映速度、VMのサービス設定・永続ディスクはここでは検証しません。承認後の導入時に少人数のテストで確認してください。Python 3.14ではdiscord.py内のasyncio非推奨APIに関する警告が出ることがあります。
+
+統計表示の追加検証: 全期間の日別棒グラフ（7日より前のAC・0件の日を含む）、週別／月別の棒グラフでも日別のTotal Effort、長い日別累計の両端マーカーの余白、自分専用statsとID必須stats_idの引数・登録IDの選択・3枚添付の共通処理を確認します。独立したdiffhistコマンドの廃止、weeklyでも生涯Difficulty分布を添付すること、ヒストグラムの空データ・小件数・大件数・長いIDでタイトルやラベルが画像内に収まること、全グラフの縦軸がAC countであることも検証します。
