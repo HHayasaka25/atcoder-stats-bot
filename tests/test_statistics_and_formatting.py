@@ -10,7 +10,7 @@ from atcoder_bot import AtCoderBot, help_embed, RegisterConfirmation
 from formatting import (JST, COLORS, difficulty, get_display_difficulty, make_update,
                         problem_label, problem_line, utf16_length)
 from plotting import stats_figures, render_stats, histogram_figure
-from conftest import NOW
+from conftest import NOW, submission
 
 TODAY = datetime(2026, 10, 8, 12, tzinfo=JST)
 
@@ -241,6 +241,56 @@ def test_command_surface_and_help_no_automatic_sync(tmp_path):
     assert bot.session is None and bot.db is None  # Construction does not fetch history.
 
 
+@pytest.mark.parametrize('mode', ['new', 'existing', 'change'])
+async def test_register_previews_latest_50_privately_without_public_delivery(tmp_path, service, api, mode):
+    if mode == 'change':
+        await service.register(10, 123, 'bob')
+    api.submissions.return_value = [submission(f'abc100_p{i}', sid=i+1, second=NOW-1000+i) for i in range(80)]
+    if mode == 'existing':
+        await service.register(10, 123, 'alice')
+        api.submissions.reset_mock()
+    bot = AtCoderBot(str(tmp_path / 'unused.db'), 42)
+    bot.service = service
+    interaction = MagicMock(guild_id=10)
+    interaction.user.id = 123
+    interaction.response.defer = AsyncMock()
+    interaction.edit_original_response = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    if mode == 'change':
+        view = RegisterConfirmation(service, 10, 123, 'alice', 'bob')
+        await view.confirm.callback(interaction)
+    else:
+        group = bot.tree.get_command('ac')
+        await group.get_command('register').callback(group, interaction, 'Alice')
+    interaction.followup.send.assert_awaited_once()
+    args, kwargs = interaction.followup.send.call_args
+    assert args == (('登録済み' if mode == 'existing' else '登録しました') + '。AC 80',)
+    assert kwargs['ephemeral'] is True
+    body = kwargs['embed'].description
+    assert body.count('https://atcoder.jp/') == 50
+    assert 'ABC100 P29]' not in body
+    assert body.index('ABC100 P30]') < body.index('ABC100 P79]')
+    assert service.db.candidates(service.db.registration(10, 123)) == []
+    assert len(service.db.rows('alice')) == 80
+    if mode == 'existing':
+        api.submissions.assert_not_awaited()
+    send = AsyncMock()
+    await service.update(10, 123, send)
+    send.assert_not_awaited()
+
+
+async def test_register_preview_hides_ongoing_and_handles_empty_history(service, api):
+    await service.register(10, 123, 'alice')
+    total, payload = await service.registration_preview('alice')
+    assert total == 0 and payload['description'] == ''
+    api.submissions.return_value = [submission(contest='abc999', pid='abc999_a')]
+    await service.register(10, 456, 'bob')
+    service.db.save_resource('contests', [dict(id='abc999', start_epoch_second=NOW-100, duration_second=7200)], NOW)
+    total, payload = await service.registration_preview('bob')
+    assert total == 1 and payload['description'] == ''
+    assert len(service.db.rows('bob')) == 1
+
+
 @pytest.mark.parametrize('command,user', [('stats', None), ('stats_id', 'bob')])
 @pytest.mark.parametrize('period', ['weekly', 'all'])
 async def test_stats_commands_share_rendering_and_route_the_correct_id(tmp_path, command, user, period):
@@ -263,9 +313,7 @@ async def test_stats_commands_share_rendering_and_route_the_correct_id(tmp_path,
     interaction.response.defer.assert_awaited_once_with(thinking=True)
     interaction.followup.send.assert_awaited_once()
     message = interaction.followup.send.call_args.args[0]
-    assert ('全期間の初AC 2問' if period == 'all' else '直近7日の初AC 1問') in message
-    assert '生涯Difficulty分布: 1問 / 生涯初AC 2問（不明 1問）' in message
-    assert 'AHC' not in message
+    assert message == ('AC 2' if period == 'all' else 'AC 1')
     assert render.call_args.args[0]['title'] == 'Daily Effort'
     assert render.call_args.args[0]['total'] == (2 if period == 'all' else 1)
     assert render.call_args.args[1:] == ([620], user or 'alice')

@@ -75,6 +75,15 @@ class ACService:
             account = self.db.account(user)
             return user, self.db.rows(user), account['synced_at'], self.metadata()[0]
 
+    async def registration_preview(self, user):
+        await self.resources(contests=True)
+        rows = self.db.rows(user)
+        eligible = [row for row in rows if self.contest_finished(row['contest_id'], int(self.now()))]
+        models, problems = self.metadata()
+        payload, _ = make_update(user, eligible, models, problems)
+        payload['title'] = f'AC — {user}'
+        return len(rows), payload
+
     def contest_finished(self, cid, now):
         contests, fetched = self.db.resource('contests')
         if not contests:
