@@ -39,14 +39,14 @@ def stats_figures(data):
     ax_a.set_ylim(0, max(1, max(bottom, default=0)) * 1.22 + .3)
     # Total Effort always has a daily axis, regardless of the bar aggregation.
     total_x = list(range(len(data['total_labels'])))
-    ax_b.plot(range(-1, len(total_x)), data['cumulative'], color='#FF8C00', marker='o', linewidth=2.5)
+    ax_b.plot(range(-1, len(total_x)), data['cumulative'], color='#FF8C00', linewidth=2.5)
     ax_b.set_ylim(0, max(1, data['total']) * 1.15)
     ax_b.yaxis.set_major_locator(MaxNLocator(nbins=6, integer=True))
     for ax, positions_all, labels in ((ax_a, x, data['labels']), (ax_b, total_x, data['total_labels'])):
         stride = max(1, (len(positions_all) + 7) // 8)
         positions = positions_all[::stride]
         ax.set_xticks(positions, [labels[i].isoformat() for i in positions], rotation=30, ha='right')
-        # Keep endpoint markers clear of the frame even for years of daily points.
+        # Keep daily endpoints clear of the frame even for years of history.
         padding = len(positions_all) * .015
         ax.set_xlim(-1 - max(.4, padding), len(positions_all) - 1 + max(.6, padding))
     return fig_a, fig_b

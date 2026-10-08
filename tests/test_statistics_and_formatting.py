@@ -117,6 +117,7 @@ def test_graphs_are_independent_and_pngs_small():
     assert a.axes[0].get_title() == 'Daily Effort'
     assert b.axes[0].get_title() == 'Total Effort'
     assert b.axes[0].lines[0].get_color() == '#FF8C00'
+    assert b.axes[0].lines[0].get_marker() == 'None'
     assert b.axes[0].lines[0].get_ydata()[0] == 0
     assert a.axes[0].get_ylim()[0] == 0
     assert b.axes[0].get_ylim()[0] == 0
