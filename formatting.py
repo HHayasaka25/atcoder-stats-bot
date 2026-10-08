@@ -61,7 +61,7 @@ def problem_line(row, models, problems):
     url = f'https://atcoder.jp/contests/{quote(cid, safe="")}/tasks/{quote(pid, safe="")}'
     line = f'[{problem_label(row, problems)}]({url})'
     value = difficulty(pid, models)
-    return line + (f' {get_emoji_for_diff(value)} {value}' if value is not None else '')
+    return f'{get_emoji_for_diff(value)} {line} {value}' if value is not None else line
 
 
 def utf16_length(text):

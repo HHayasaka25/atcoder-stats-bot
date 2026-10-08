@@ -214,8 +214,8 @@ def test_update_order_unknown_and_jst_grouping():
     assert payload['title'] == 'AC update — alice（直近50件まで）'
     lines = payload['description'].splitlines()
     assert lines[0] == '2026-10-07'
-    assert lines[-1].endswith(' 🟤 620')
-    assert '[ABC100 A](https://atcoder.jp/contests/abc100/tasks/abc100_a) 🟤 620' == lines[-1]
+    assert lines[-1].startswith('🟤 ') and lines[-1].endswith(' 620')
+    assert '🟤 [ABC100 A](https://atcoder.jp/contests/abc100/tasks/abc100_a) 620' == lines[-1]
     assert lines[1].endswith(')')  # Unknown has neither number nor emoji.
     assert not any(line.startswith(('-', '•')) for line in lines)
     assert [r['submission_id'] for r in selected] == [1, 2]

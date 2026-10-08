@@ -29,7 +29,7 @@ MPLCONFIGDIR=/tmp/atcoder-bot-mpl .venv/bin/python -m pytest -q
 | 15 期間内累計 | test_statistics_and_formatting: weekly_zero_days_period_cumulative、total_effort_is_daily_for_every_all_aggregation |
 | 16 Difficulty不明もAC計数 | test_statistics_and_formatting: weekly_zero_days、correction_and_histogram_unknown |
 | 17 独立Figure・PNG | test_statistics_and_formatting: graphs_are_independent_and_pngs_small |
-| 18 問題→色→Difficulty | test_statistics_and_formatting: update_order_unknown_and_jst_grouping |
+| 18 色→問題リンク→Difficulty | test_statistics_and_formatting: update_order_unknown_and_jst_grouping |
 | 19 Embed制限・1メッセージ | test_statistics_and_formatting: embed_limits、test_service: more_than_50 |
 | 20 同時API間隔 | test_api: concurrent_requests_shared_interval |
 | 21 自動同期なし | test_statistics_and_formatting: command_surface_and_help_no_automatic_sync |
