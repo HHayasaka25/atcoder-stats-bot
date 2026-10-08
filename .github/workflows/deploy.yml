@@ -1,9 +1,8 @@
 name: Deploy Bot
 
-# mainブランチに push されたときに実行する
+# 本番の再起動を伴うため、承認後に手動実行する。
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -11,7 +10,7 @@ jobs:
     steps:
       - name: SSH and Deploy
         # SSHでログインするための便利なプログラム（アクション）を使います
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.GCP_IP }}
           username: ${{ secrets.GCP_USER }}
@@ -19,6 +18,7 @@ jobs:
           port: 22
           # ここからが、サーバーの中で実行させる「実際のコマンド」です
           script: |
+            set -eu
             cd ~/atcoder-stats-bot
             git pull origin main
             source venv/bin/activate
