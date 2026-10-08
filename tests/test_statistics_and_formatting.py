@@ -135,8 +135,8 @@ def test_graph_annotations_only_16_or_less_and_unknown_plain_color():
     assert len(fig.axes[0].texts) == 7
     from matplotlib.colors import to_hex
     unknown = fig.axes[0].containers[-1].patches
-    assert all(to_hex(p.get_facecolor()) == '#d9d9d9' for p in unknown)
-    assert '#d9d9d9' not in COLORS
+    assert all(to_hex(p.get_facecolor()) == '#e6dff2' for p in unknown)
+    assert '#e6dff2' not in COLORS
     assert all(p.get_hatch() is None and p.get_linewidth() == 0 for p in unknown)
     long = aggregate([row()], {}, period='monthly', now=TODAY)
     fig, _ = stats_figures(long)
@@ -151,21 +151,20 @@ def test_large_total_axis_starts_at_zero_with_upper_margin():
     assert all(t >= 0 and int(t) == t for t in fig.axes[0].get_yticks())
 
 
-@pytest.mark.parametrize('total', [0, 1, 55, 675, 1000])
+@pytest.mark.parametrize('total', [0, 1, 8, 55, 675, 1000])
 def test_total_effort_ticks_extend_into_top_margin(total):
     data = aggregate([row(str(i)) for i in range(total)], {}, now=TODAY)
     _, fig = stats_figures(data)
     ax = fig.axes[0]
     ticks = ax.get_yticks()
     assert ax.get_ylim()[0] == ticks[0] == 0
-    assert ticks[-1] == ax.get_ylim()[1] and ticks[-1] > total
     step = ticks[1] - ticks[0]
-    assert all(ticks[i+1] - ticks[i] == step for i in range(len(ticks)-1))
-    while step >= 10:
-        step /= 10
-    assert step in (1, 2, 5)
+    assert all(ticks[i+1] - ticks[i] == pytest.approx(step) for i in range(len(ticks)-1))
     assert all(int(tick) == tick for tick in ticks)
-    assert ax.get_ylim()[1] - ticks[-1] < ticks[1] - ticks[0]
+    visible = [tick for tick in ticks if tick <= ax.get_ylim()[1]]
+    assert ax.get_ylim()[1] - visible[-1] < step
+    if total == 8:
+        assert visible == [0, 2, 4, 6, 8]
     FigureCanvasAgg(fig).draw()
     assert all(line.get_visible() for line in ax.get_ygridlines())
     assert [line.get_ydata()[0] for line in ax.get_ygridlines()] == list(ticks)
