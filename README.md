@@ -25,6 +25,8 @@ registerの応答とupdateの処理結果は実行者だけに表示します。
 
 ## 調査結果と旧Botからの変更
 
+EffortのDifficulty不明分は網掛けせず、既存のDifficulty色と異なる薄い灰色で表示します。Total Effortの縦軸は0から始まり、目盛りは1・2・5の10倍刻みの間隔を使用します。上余白も同じ間隔の目盛り・横線を表示し、上端を目盛りに揃えます。
+
 調査開始時のGit HEADは`2bbfa12`、作業ツリーはクリーンでした。既存の全プロジェクトファイル（`atcoder_bot.py`、`requirements.txt`、`README.md`、`.github/workflows/deploy.yml`）を確認しました。サービス定義・既存DB・永続ディスクのマウント設定はリポジトリにありません。
 
 旧READMEによる環境はGoogle CloudのUbuntu VM、systemdの`discord-bot.service`、Pythonの`venv`です。旧READMEの配置先は`/home/scoalpha5/atcoder-bot`、実際のデプロイ設定の配置先は`~/atcoder-stats-bot`で異なっています。正しいパス・Pythonバージョン・実行ユーザー・環境変数の設定場所は、導入前にVMのサービス定義で確認してください。Cloud Runなどへの移行は行いません。

@@ -119,7 +119,7 @@ def test_graphs_are_independent_and_pngs_small():
     assert b.axes[0].lines[0].get_color() == '#FF8C00'
     assert b.axes[0].lines[0].get_ydata()[0] == 0
     assert a.axes[0].get_ylim()[0] == 0
-    assert b.axes[0].get_ylim()[0] < 0
+    assert b.axes[0].get_ylim()[0] == 0
     assert all(s.get_visible() for ax in (a.axes[0], b.axes[0]) for s in ax.spines.values())
     assert a.axes[0].get_legend() is None
     images = render_stats(data, [620], 'alice')
@@ -129,21 +129,25 @@ def test_graphs_are_independent_and_pngs_small():
         assert len(image.getvalue()) < 1024*1024
 
 
-def test_graph_annotations_only_16_or_less_and_unknown_hatch():
+def test_graph_annotations_only_16_or_less_and_unknown_plain_color():
     short = aggregate([row()], {}, now=TODAY)
     fig, _ = stats_figures(short)
     assert len(fig.axes[0].texts) == 7
-    assert any(p.get_hatch() == '///' for p in fig.axes[0].patches)
+    from matplotlib.colors import to_hex
+    unknown = fig.axes[0].containers[-1].patches
+    assert all(to_hex(p.get_facecolor()) == '#d9d9d9' for p in unknown)
+    assert '#d9d9d9' not in COLORS
+    assert all(p.get_hatch() is None and p.get_linewidth() == 0 for p in unknown)
     long = aggregate([row()], {}, period='monthly', now=TODAY)
     fig, _ = stats_figures(long)
     assert len(fig.axes[0].texts) == 0
 
 
-def test_large_total_baseline_has_visible_margin():
+def test_large_total_axis_starts_at_zero_with_upper_margin():
     data = aggregate([row(str(i)) for i in range(1000)], {}, now=TODAY)
     _, fig = stats_figures(data)
     bottom, top = fig.axes[0].get_ylim()
-    assert -bottom / (top-bottom) > .04
+    assert bottom == 0 and top > 1000
     assert all(t >= 0 and int(t) == t for t in fig.axes[0].get_yticks())
 
 
@@ -153,9 +157,13 @@ def test_total_effort_ticks_extend_into_top_margin(total):
     _, fig = stats_figures(data)
     ax = fig.axes[0]
     ticks = ax.get_yticks()
-    step = max(1, (total + 5) // 6)
-    assert list(ticks) == list(range(0, int(ax.get_ylim()[1]) + 1, step))
-    assert list(ticks[ticks <= total]) == list(range(0, total + 1, step))
+    assert ax.get_ylim()[0] == ticks[0] == 0
+    assert ticks[-1] == ax.get_ylim()[1] and ticks[-1] > total
+    step = ticks[1] - ticks[0]
+    assert all(ticks[i+1] - ticks[i] == step for i in range(len(ticks)-1))
+    while step >= 10:
+        step /= 10
+    assert step in (1, 2, 5)
     assert all(int(tick) == tick for tick in ticks)
     assert ax.get_ylim()[1] - ticks[-1] < ticks[1] - ticks[0]
     FigureCanvasAgg(fig).draw()

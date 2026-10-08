@@ -29,11 +29,9 @@ def stats_figures(data):
     fig_b, ax_b = figure('Total Effort')
     x = list(range(len(data['labels'])))
     bottom = [0] * len(x)
-    for i, col in enumerate(COLORS + ['#b0b0b0']):
+    for i, col in enumerate(COLORS + ['#d9d9d9']):
         heights = [row[i] for row in data['values']]
-        ax_a.bar(x, heights, bottom=bottom, color=col,
-                 edgecolor='#666666' if i == 8 else 'none',
-                 linewidth=0 if i != 8 else .4, hatch='///' if i == 8 else None)
+        ax_a.bar(x, heights, bottom=bottom, color=col, edgecolor='none', linewidth=0)
         bottom = [b + h for b, h in zip(bottom, heights)]
     if len(x) <= 16:
         for index, count in zip(x, data['counts']):
@@ -43,10 +41,10 @@ def stats_figures(data):
     total_x = list(range(len(data['total_labels'])))
     ax_b.plot(range(-1, len(total_x)), data['cumulative'], color='#FF8C00', marker='o', linewidth=2.5)
     upper = max(1, data['total']) * 1.15 + .3
-    ax_b.set_ylim(-max(1, data['total']) * .06, upper)
-    # Continue the same tick/grid spacing through the headroom above the data.
-    step = max(1, (data['total'] + 5) // 6)
-    ticks = list(range(0, int(upper) + 1, step))
+    # Round the upper bound to a tick with a familiar integer interval.
+    locator = MaxNLocator(nbins=8, integer=True, steps=[1, 2, 5, 10])
+    ticks = locator.tick_values(0, upper)
+    ax_b.set_ylim(0, ticks[-1])
     ax_b.set_yticks(ticks)
     for ax, positions_all, labels in ((ax_a, x, data['labels']), (ax_b, total_x, data['total_labels'])):
         stride = max(1, (len(positions_all) + 7) // 8)
