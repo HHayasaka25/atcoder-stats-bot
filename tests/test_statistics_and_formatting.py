@@ -147,6 +147,22 @@ def test_large_total_baseline_has_visible_margin():
     assert all(t >= 0 and int(t) == t for t in fig.axes[0].get_yticks())
 
 
+@pytest.mark.parametrize('total', [0, 1, 55, 675, 1000])
+def test_total_effort_ticks_extend_into_top_margin(total):
+    data = aggregate([row(str(i)) for i in range(total)], {}, now=TODAY)
+    _, fig = stats_figures(data)
+    ax = fig.axes[0]
+    ticks = ax.get_yticks()
+    step = max(1, (total + 5) // 6)
+    assert list(ticks) == list(range(0, int(ax.get_ylim()[1]) + 1, step))
+    assert list(ticks[ticks <= total]) == list(range(0, total + 1, step))
+    assert all(int(tick) == tick for tick in ticks)
+    assert ax.get_ylim()[1] - ticks[-1] < ticks[1] - ticks[0]
+    FigureCanvasAgg(fig).draw()
+    assert all(line.get_visible() for line in ax.get_ygridlines())
+    assert [line.get_ydata()[0] for line in ax.get_ygridlines()] == list(ticks)
+
+
 def test_daily_all_endpoint_markers_have_horizontal_margin():
     rows = [row(date=TODAY-timedelta(days=1000)), row('abc100_b')]
     data = aggregate(rows, {}, period='all', aggregation='monthly', now=TODAY)

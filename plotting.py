@@ -42,8 +42,11 @@ def stats_figures(data):
     # Total Effort always has a daily axis, regardless of the bar aggregation.
     total_x = list(range(len(data['total_labels'])))
     ax_b.plot(range(-1, len(total_x)), data['cumulative'], color='#FF8C00', marker='o', linewidth=2.5)
-    ax_b.set_ylim(-max(1, data['total']) * .06, max(1, data['total']) * 1.15 + .3)
-    ticks = list(range(0, max(1, data['total']) + 1, max(1, (data['total'] + 5) // 6)))
+    upper = max(1, data['total']) * 1.15 + .3
+    ax_b.set_ylim(-max(1, data['total']) * .06, upper)
+    # Continue the same tick/grid spacing through the headroom above the data.
+    step = max(1, (data['total'] + 5) // 6)
+    ticks = list(range(0, int(upper) + 1, step))
     ax_b.set_yticks(ticks)
     for ax, positions_all, labels in ((ax_a, x, data['labels']), (ax_b, total_x, data['total_labels'])):
         stride = max(1, (len(positions_all) + 7) // 8)
