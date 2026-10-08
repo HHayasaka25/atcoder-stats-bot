@@ -301,7 +301,7 @@ async def test_registered_statistics_never_fetch_api(service, api, db):
     service.now = lambda: NOW+1000000
     for user in (None, 'ALICE'):
         name, rows, synced, models = await service.stats_data(10, 123, user)
-        assert name == 'alice' and len(rows) == 1 and synced == NOW
+        assert name == (user or 'Alice') and len(rows) == 1 and synced == NOW
     api.submissions.assert_not_awaited()
     api.resource.assert_not_awaited()
 
@@ -315,6 +315,34 @@ async def test_unregistered_stats_cache_without_binding(service, api, db):
     service.now = lambda: NOW+3601
     await service.stats_data(10, 123, 'alice')
     assert api.submissions.await_count == 2
+
+
+async def test_display_case_is_preserved_without_changing_account_identity(service, api, db):
+    api.submissions.return_value = [submission()]
+    await service.register(10, 123, 'ALIce')
+    reg = dict(db.registration(10, 123))
+    assert reg['atcoder_id'] == 'alice' and reg['display_id'] == 'ALIce'
+    assert (await service.stats_data(10, 123))[0] == 'ALIce'
+    assert (await service.stats_data(10, 123, 'aLiCe'))[0] == 'aLiCe'
+    _, payload = await service.registration_preview('ALIce')
+    assert payload['title'] == 'AC — ALIce'
+    api.submissions.reset_mock()
+    await service.register(10, 123, 'Alice', expected='alice')
+    api.submissions.assert_not_awaited()
+    current = dict(db.registration(10, 123))
+    assert current == dict(reg, display_id='Alice')
+    assert db.candidates(current) == []
+    api.submissions.return_value = [submission('abc100_b', sid=2)]
+    send = AsyncMock(return_value=12345)
+    await service.update(10, 123, send)
+    assert 'Alice' in send.call_args.args[0]['title']
+    assert len(db.rows('alice')) == 2
+    with pytest.raises(RegistrationError, match='別ユーザー'):
+        await service.register(10, 456, 'ALICE')
+    path = db.conn.execute('PRAGMA database_list').fetchone()[2]
+    reopened = Database(path)
+    assert reopened.registration(10, 123)['display_id'] == 'Alice'
+    reopened.close()
 
 
 async def test_same_member_concurrent_update_sends_once(service, api, db):

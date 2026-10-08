@@ -25,7 +25,7 @@ def help_embed():
     descriptions = [
         ('/ac register', 'Discord IDにAtCoder IDを登録し、直近50ACを自分だけに表示します。開催中は表示を保留します。変更時は確認が必要です。\n引数: atcoder_id（必須）\n例: `/ac register atcoder_id:tourist`'),
         ('/ac update', '登録IDの履歴全体を最新化します（取得は48時間重複を含む差分）。全初ACを保存し、公開投稿は直近50問まで・1メッセージです。古い省略分は持ち越しません。開催中は終了まで保留します。\n引数: なし\n例: `/ac update`'),
-        ('/ac stats', '自分の登録IDの初AC数・期間内累計・生涯Difficulty分布を3枚の画像で表示します。保存済み履歴を使用します。Total Effortは常に日別、Difficulty分布は100刻みで不明を除外します。\n引数: period=weekly/monthly/all（初期値weekly）, aggregation=daily/weekly/monthly（棒グラフのallのみ、初期値monthly）\n例: `/ac stats period:all aggregation:daily`'),
+        ('/ac stats', '自分の登録IDの初AC数・期間内累計・生涯Difficulty分布を3枚の画像で表示します。保存済み履歴を使用します。Total Effortは常に日別、Difficulty分布は100刻みで不明を除外します。\n引数: period=weekly/monthly/all（初期値all）, aggregation=daily/weekly/monthly（棒グラフのallのみ、初期値daily）\n例: `/ac stats`'),
         ('/ac stats_id', '指定したAtCoder IDの統計を表示します。未登録IDだけ全履歴を取得しキャッシュします。Discordとの登録は作りません。\n引数: atcoder_id（必須）, period・aggregation（statsと同じ）\n例: `/ac stats_id atcoder_id:tourist period:all aggregation:monthly`'),
         ('/ac help', 'このヘルプを表示します。\n引数: なし\n例: `/ac help`'),
     ]
@@ -118,17 +118,18 @@ class ACCommands(app_commands.Group):
         self.service.db.check_registration(interaction.guild_id, interaction.user.id, user, expected)
         if expected == user:
             await interaction.response.defer(ephemeral=True, thinking=True)
-            await show_registration(interaction, self.service, user, already_registered=True)
+            await self.service.register(interaction.guild_id, interaction.user.id, atcoder_id, expected)
+            await show_registration(interaction, self.service, atcoder_id, already_registered=True)
             return
         if expected:
-            view = RegisterConfirmation(self.service, interaction.guild_id, interaction.user.id, user, expected)
+            view = RegisterConfirmation(self.service, interaction.guild_id, interaction.user.id, atcoder_id, expected)
             await interaction.response.send_message(
-                f'登録IDを `{expected}` から `{user}` に変更します。新しいIDの全履歴を取得し、過去ACは投稿しません。変更しますか？',
+                f'登録IDを `{reg["display_id"]}` から `{atcoder_id}` に変更します。新しいIDの全履歴を取得し、過去ACは投稿しません。変更しますか？',
                 view=view, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await self.service.register(interaction.guild_id, interaction.user.id, user)
-        await show_registration(interaction, self.service, user)
+        await self.service.register(interaction.guild_id, interaction.user.id, atcoder_id)
+        await show_registration(interaction, self.service, atcoder_id)
 
     async def target_channel(self, interaction):
         if not self.bot.target_channel_id:
@@ -165,17 +166,17 @@ class ACCommands(app_commands.Group):
         await interaction.followup.send(text, ephemeral=True)
 
     @app_commands.command(name='stats', description='自分の初AC数・日別累計・生涯Difficulty分布を表示します')
-    @app_commands.describe(period='weekly=7日、monthly=30日、all=全期間', aggregation='all時の棒グラフ集計: daily/weekly/monthly（初期値monthly）')
+    @app_commands.describe(period='weekly=7日、monthly=30日、all=全期間（初期値all）', aggregation='all時の棒グラフ集計: daily/weekly/monthly（初期値daily）')
     async def stats(self, interaction: discord.Interaction,
-                    period: Literal['weekly', 'monthly', 'all'] = 'weekly',
-                    aggregation: Literal['daily', 'weekly', 'monthly'] = 'monthly'):
+                    period: Literal['weekly', 'monthly', 'all'] = 'all',
+                    aggregation: Literal['daily', 'weekly', 'monthly'] = 'daily'):
         await self._show_stats(interaction, period, aggregation)
 
     @app_commands.command(name='stats_id', description='指定IDの初AC数・日別累計・生涯Difficulty分布を表示します')
-    @app_commands.describe(atcoder_id='統計を見るAtCoder ID（必須）', period='weekly=7日、monthly=30日、all=全期間', aggregation='all時の棒グラフ集計: daily/weekly/monthly（初期値monthly）')
+    @app_commands.describe(atcoder_id='統計を見るAtCoder ID（必須）', period='weekly=7日、monthly=30日、all=全期間（初期値all）', aggregation='all時の棒グラフ集計: daily/weekly/monthly（初期値daily）')
     async def stats_id(self, interaction: discord.Interaction, atcoder_id: str,
-                       period: Literal['weekly', 'monthly', 'all'] = 'weekly',
-                       aggregation: Literal['daily', 'weekly', 'monthly'] = 'monthly'):
+                       period: Literal['weekly', 'monthly', 'all'] = 'all',
+                       aggregation: Literal['daily', 'weekly', 'monthly'] = 'daily'):
         await self._show_stats(interaction, period, aggregation, atcoder_id)
 
     async def _show_stats(self, interaction, period, aggregation, atcoder_id=None):

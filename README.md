@@ -8,18 +8,20 @@ AtCoder Problems APIだけを履歴ソースとし、問題ごとの生涯初AC�
 |---|---|
 | `/ac register atcoder_id:alice` | Discordの数値IDとAtCoder IDをサーバー単位で登録。全提出を取得して初ACを保存し、直近50ACを実行者だけに表示します。開催中・開催情報不明の問題は表示を保留します。変更には120秒以内のボタン確認が必要です。同一サーバーでIDの重複登録は拒否します。 |
 | `/ac update` | 48時間の重複を含む差分取得。新規初ACは全件保存し、投稿可能な直近50問までを古い日時順・JSTの日付別で精進チャンネルに1回だけ投稿します。 |
-| `/ac stats` | 自分の直近7日の日別初AC数・期間内累計・生涯Difficulty分布を、3枚の独立したPNGで表示。 |
+| `/ac stats` | 自分の全期間の日別初AC数・累計・生涯Difficulty分布を、3枚の独立したPNGで表示。 |
 | `/ac stats period:monthly` | 自分の直近30日を日別表示。ID入力は不要です。 |
 | `/ac stats period:all aggregation:daily` | 自分の全期間を日別表示。ACが0件の日も含めます。 |
-| `/ac stats period:all aggregation:weekly` | 全期間を月曜始まりの週別表示。allの初期値は月別（aggregation:monthly）。 |
+| `/ac stats period:all aggregation:weekly` | 全期間を月曜始まりの週別表示。 |
 | `/ac stats_id atcoder_id:alice period:all aggregation:monthly` | 指定したAtCoder IDの統計を表示。IDは必須で、period・aggregationはstatsと共通。 |
 | `/ac help` | 上記5コマンドの日本語ヘルプ。 |
 
-`/ac stats`は自分専用、`/ac stats_id`はAtCoder ID指定用です。以前の`/ac stats atcoder_id:...`は`/ac stats_id atcoder_id:...`へ変更してください。Total Effortは選択期間内の累計初AC数を**常に日別**で表示し、期間の開始は0です。全期間の棒グラフは`aggregation=daily/weekly/monthly`で日別・週別・月別を選べます（初期値monthly）。直近7日・30日の棒グラフは常に日別です。棒と累計の横軸はそれぞれの集計単位で独立しています。
+`/ac stats`は自分専用、`/ac stats_id`はAtCoder ID指定用です。両方とも引数を省略すると全期間・日別（period:all、aggregation:daily）を表示します。以前の`/ac stats atcoder_id:...`は`/ac stats_id atcoder_id:...`へ変更してください。Total Effortは選択期間内の累計初AC数を**常に日別**で表示し、期間の開始は0です。全期間の棒グラフは`aggregation=daily/weekly/monthly`で日別・週別・月別を選べます（初期値daily）。直近7日・30日の棒グラフは常に日別です。棒と累計の横軸はそれぞれの集計単位で独立しています。
 
 Difficulty分布はstats/stats_idに統合しました。単独の`/ac diffhist`は廃止しています。分布は従来どおり**生涯初AC**を100刻みで集計し、Difficulty不明を除外して件数を表示します。periodは棒と累計の期間を指定します。1回の履歴取得から3枚を生成し、1回のDiscord応答に添付します。全グラフの縦軸は`AC count`です。ヒストグラムの下余白と上端の余白を調整し、右側に1bin分（Difficulty 100）の余白を設けています。長いIDのタイトルは2行にして画像内に収めています。
 
 registerの応答とupdateの処理結果は実行者だけに表示します。registerの直近50ACは古い日時順・日付別に表示し、Discordの文字数上限を超える場合は古い問題から省略します。同じIDで再実行すると保存済み履歴から再表示します。過去ACは精進チャンネルへ投稿せず、updateの投稿候補にも追加しません。updateの公開投稿先は常に`TARGET_CHANNEL_ID`です。他のチャンネルから実行しても実行場所へは投稿しません。投稿先が同じサーバーに属し、実行者が閲覧可能であることと、Botの閲覧・送信・Embedリンク権限を検証します。stats・stats_id・helpは公開応答です。統計の応答文は選択期間の件数だけ（例: `AC 675`）です。DMでは使用できません。
+
+ユーザー名は入力時の大文字・小文字で表示します。登録済みIDも `/ac register` に希望の表記を入力し直すと、履歴や投稿状態を維持したまま表記だけ変更できます。`/ac stats_id` はそのコマンドで入力した表記を使います。
 
 所有者の厳密な確認は行いません。登録成功は本人確認を意味しません。提出が0件の応答では、ユーザーが存在しないのか履歴がないのかも判別できません。
 
@@ -81,9 +83,9 @@ Discord側では`bot`と`applications.commands`のスコープ、精進チャン
 
 標準ライブラリ`statistics`との衝突を避け、集計モジュール名を`ac_statistics.py`にしています。
 
-DBのスキーマバージョンは`PRAGMA user_version=2`です。旧版1からは、バッチの`superseded_at`列と対応する一意インデックスをトランザクションで追加・変更します。既存履歴・登録・送信待ちデータは保持します。
+DBのスキーマバージョンは`PRAGMA user_version=3`です。旧版1からはバッチの`superseded_at`列と対応する一意インデックスを追加・変更し、旧版2からは登録の`display_id`列を追加します。既存履歴・登録・送信待ちデータは保持します。旧登録の表示表記は保存済みIDを引き継ぎます。
 
-- `ac_registrations`: `(guild_id, discord_id)`が主キー、`(guild_id, atcoder_id)`も一意。AtCoder IDは小文字に正規化。登録ごとのgeneration IDと登録日時を保持。
+- `ac_registrations`: `(guild_id, discord_id)`が主キー、`(guild_id, atcoder_id)`も一意。照合用AtCoder IDは小文字に正規化し、入力時の大文字・小文字は`display_id`に保存。登録ごとのgeneration IDと登録日時を保持。
 - `ac_accounts`: AtCoder ID単位の差分カーソル・同期成功日時・初回完了状態。
 - `ac_firsts`: `(atcoder_id, problem_id)`が主キー。contest、提出ID、初AC秒を保存し、より古いACが判明すれば更新。
 - `ac_deliveries`: 登録generationごとの各問題の状態。`baseline`=登録時過去履歴、`pending`=新規、`held`=開催中／不明保留、`excluded`=上限で省略、`queued`=送信待ち、`posted`=送信済み。

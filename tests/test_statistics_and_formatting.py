@@ -248,14 +248,14 @@ def test_command_surface_and_help_no_automatic_sync(tmp_path):
     assert {c.name for c in group.commands} == {'register', 'update', 'stats', 'stats_id', 'help'}
     stats = group.get_command('stats')
     assert [p.name for p in stats.parameters] == ['period', 'aggregation']
-    assert stats.get_parameter('period').default == 'weekly'
-    assert stats.get_parameter('aggregation').default == 'monthly'
+    assert stats.get_parameter('period').default == 'all'
+    assert stats.get_parameter('aggregation').default == 'daily'
     assert [c.value for c in stats.get_parameter('aggregation').choices] == ['daily', 'weekly', 'monthly']
     stats_id = group.get_command('stats_id')
     assert [p.name for p in stats_id.parameters] == ['atcoder_id', 'period', 'aggregation']
     assert stats_id.get_parameter('atcoder_id').required
-    assert stats_id.get_parameter('period').default == 'weekly'
-    assert stats_id.get_parameter('aggregation').default == 'monthly'
+    assert stats_id.get_parameter('period').default == 'all'
+    assert stats_id.get_parameter('aggregation').default == 'daily'
     assert len(help_embed().fields) == 5 and len(help_embed()) < 6000
     for name in ('atcoder_bot.py', 'service.py'):
         source = Path(name).read_text()
@@ -290,6 +290,7 @@ async def test_register_previews_latest_50_privately_without_public_delivery(tmp
     assert args == (('登録済み' if mode == 'existing' else '登録しました') + '。AC 80',)
     assert kwargs['ephemeral'] is True
     body = kwargs['embed'].description
+    assert kwargs['embed'].title == ('AC — alice' if mode == 'change' else 'AC — Alice')
     assert body.count('https://atcoder.jp/') == 50
     assert 'ABC100 P29]' not in body
     assert body.index('ABC100 P30]') < body.index('ABC100 P79]')
@@ -315,7 +316,7 @@ async def test_register_preview_hides_ongoing_and_handles_empty_history(service,
 
 
 @pytest.mark.parametrize('command,user', [('stats', None), ('stats_id', 'bob')])
-@pytest.mark.parametrize('period', ['weekly', 'all'])
+@pytest.mark.parametrize('period', ['weekly', 'all', None])
 async def test_stats_commands_share_rendering_and_route_the_correct_id(tmp_path, command, user, period):
     bot = AtCoderBot(str(tmp_path / 'unused.db'), 42)
     bot.service = MagicMock()
@@ -328,7 +329,7 @@ async def test_stats_commands_share_rendering_and_route_the_correct_id(tmp_path,
     interaction.followup.send = AsyncMock()
     with patch('atcoder_bot.aggregate', side_effect=lambda *args: aggregate(*args, now=TODAY)), \
          patch('atcoder_bot.render_stats', return_value=(io.BytesIO(b'png-a'), io.BytesIO(b'png-b'), io.BytesIO(b'png-c'))) as render:
-        args = {'period': period, 'aggregation': 'daily'}
+        args = {'period': period, 'aggregation': 'daily'} if period else {}
         if user:
             args['atcoder_id'] = user
         await group.get_command(command).callback(group, interaction, **args)
@@ -336,9 +337,9 @@ async def test_stats_commands_share_rendering_and_route_the_correct_id(tmp_path,
     interaction.response.defer.assert_awaited_once_with(thinking=True)
     interaction.followup.send.assert_awaited_once()
     message = interaction.followup.send.call_args.args[0]
-    assert message == ('AC 2' if period == 'all' else 'AC 1')
+    assert message == ('AC 1' if period == 'weekly' else 'AC 2')
     assert render.call_args.args[0]['title'] == 'Daily Effort'
-    assert render.call_args.args[0]['total'] == (2 if period == 'all' else 1)
+    assert render.call_args.args[0]['total'] == (1 if period == 'weekly' else 2)
     assert render.call_args.args[1:] == ([620], user or 'alice')
     files = interaction.followup.send.call_args.kwargs['files']
     assert [file.filename for file in files] == ['effort.png', 'total_effort.png', 'diff_hist.png']

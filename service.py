@@ -47,15 +47,17 @@ class ACService:
         return models or {}, {r['id']: r for r in (problems or [])}
 
     async def register(self, guild, member, user, expected=None):
+        display_id = user
         user = normalize_id(user)
         async with self.member_lock(guild, member):
             self.db.check_registration(guild, member, user, expected)
             if expected == user:
+                self.db.set_display_id(guild, member, user, display_id)
                 return
             async with self.account_lock(user):
                 started = int(self.now())
                 rows = await self.api.submissions(user, 0)
-                self.db.register(guild, member, user, rows, started, int(self.now()), expected)
+                self.db.register(guild, member, user, rows, started, int(self.now()), expected, display_id)
             await self.resources()
 
     async def stats_data(self, guild, member, user=None):
@@ -64,6 +66,9 @@ class ACService:
             if not reg:
                 raise RegistrationError('先に /ac register でAtCoder IDを登録してください。')
             user = reg['atcoder_id']
+            display_id = reg['display_id']
+        else:
+            display_id = user
         user = normalize_id(user)
         async with self.account_lock(user):
             account = self.db.account(user)
@@ -73,11 +78,11 @@ class ACService:
                 self.db.merge(user, rows, started, int(self.now()))
                 await self.resources()
             account = self.db.account(user)
-            return user, self.db.rows(user), account['synced_at'], self.metadata()[0]
+            return display_id, self.db.rows(user), account['synced_at'], self.metadata()[0]
 
     async def registration_preview(self, user):
         await self.resources(contests=True)
-        rows = self.db.rows(user)
+        rows = self.db.rows(normalize_id(user))
         eligible = [row for row in rows if self.contest_finished(row['contest_id'], int(self.now()))]
         models, problems = self.metadata()
         payload, _ = make_update(user, eligible, models, problems)
@@ -116,7 +121,7 @@ class ACService:
             for row in self.db.candidates(reg):
                 (eligible if self.contest_finished(row['contest_id'], now) else held).append(row)
             models, problems = self.metadata()
-            payload, selected = make_update(user, eligible, models, problems)
+            payload, selected = make_update(reg['display_id'], eligible, models, problems)
             batch = self.db.prepare(reg, eligible, held, selected, payload, now)
             if batch:
                 await self._send(batch, send)

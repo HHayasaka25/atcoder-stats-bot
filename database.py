@@ -21,7 +21,7 @@ class Database:
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         tables = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         expected = {"ac_accounts", "ac_firsts", "ac_registrations", "ac_deliveries", "ac_batches", "ac_resources"}
-        if version not in (0, 1, 2) or (version == 0 and tables & expected):
+        if version not in (0, 1, 2, 3) or (version == 0 and tables & expected):
             self.conn.close()
             raise RuntimeError("対応していない既存DBです。別のDATABASE_PATHを指定してください。")
         self.conn.executescript("""
@@ -66,6 +66,11 @@ class Database:
                 self.conn.execute("""CREATE UNIQUE INDEX ac_one_pending_batch
                     ON ac_batches(registration_id) WHERE state='pending' AND superseded_at IS NULL""")
                 self.conn.execute("PRAGMA user_version=2")
+        if version < 3:
+            with self.transaction():
+                self.conn.execute("ALTER TABLE ac_registrations ADD COLUMN display_id TEXT")
+                self.conn.execute("UPDATE ac_registrations SET display_id=atcoder_id")
+                self.conn.execute("PRAGMA user_version=3")
 
     @contextmanager
     def transaction(self):
@@ -127,15 +132,23 @@ class Database:
                 self.conn.execute("INSERT OR IGNORE INTO ac_deliveries VALUES(?,?,'pending',NULL)", (reg[0], pid))
         return new
 
-    def register(self, guild, discord_id, user, submissions, cursor, now, expected=None):
+    def set_display_id(self, guild, discord_id, user, display_id):
+        with self.transaction():
+            self.check_registration(guild, discord_id, user, user)
+            self.conn.execute("UPDATE ac_registrations SET display_id=? WHERE guild_id=? AND discord_id=?",
+                              (display_id, guild, discord_id))
+
+    def register(self, guild, discord_id, user, submissions, cursor, now, expected=None, display_id=None):
         with self.transaction():
             self.check_registration(guild, discord_id, user, expected)
             self._merge(user, submissions, cursor, now)
             generation = uuid.uuid4().hex
-            self.conn.execute("""INSERT INTO ac_registrations VALUES(?,?,?,?,?)
+            self.conn.execute("""INSERT INTO ac_registrations
+                (guild_id,discord_id,atcoder_id,registration_id,registered_at,display_id) VALUES(?,?,?,?,?,?)
                 ON CONFLICT(guild_id,discord_id) DO UPDATE SET
-                atcoder_id=excluded.atcoder_id,registration_id=excluded.registration_id,registered_at=excluded.registered_at""",
-                (guild, discord_id, user, generation, now))
+                atcoder_id=excluded.atcoder_id,registration_id=excluded.registration_id,
+                registered_at=excluded.registered_at,display_id=excluded.display_id""",
+                (guild, discord_id, user, generation, now, display_id or user))
             self.conn.execute("""INSERT INTO ac_deliveries
                 SELECT ?,problem_id,'baseline',NULL FROM ac_firsts WHERE atcoder_id=?""", (generation, user))
 
